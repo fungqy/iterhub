@@ -55,9 +55,9 @@ const routes: RouteRecordRaw[] = [
         meta: { title: "质量报表", icon: "pi pi-chart-bar", order: 5 },
     },
     {
-        path: "/screen",
-        name: "Screen",
-        component: () => import("@/views/screen/Screen.vue"),
+        path: "/doc-import",
+        name: "DocImport",
+        component: () => import("@/views/doc-import/DocImport.vue"),
         meta: { title: "文档导入", icon: "pi pi-file-import", order: 6 },
     },
     {

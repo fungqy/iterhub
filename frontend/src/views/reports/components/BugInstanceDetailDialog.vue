@@ -54,7 +54,7 @@ const isDoc = computed(() => props.source === 'DOC')
  * 现在页面 provide 一次(见 useSprintScope),这里 inject 即可 ——
  * 新增列表只要挂在同一个页面下就自动是对的,没有可漏的环节。
  *
- * 取不到时(如文档故障所在的 /screen 页面没有 Sprint 语境)为 null,
+ * 取不到时(如文档故障所在的 /doc-import 页面没有 Sprint 语境)为 null,
  * 后端只按 issue_key 取一行 —— 文档故障的 key 本就是唯一键,不需要消歧。
  */
 const sprintScope = useSprintScope()
