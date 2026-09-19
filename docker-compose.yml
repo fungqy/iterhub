@@ -1,0 +1,40 @@
+services:
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        - VITE_API_HOST=http://localhost:8008
+        - VITE_BASE=/iterhub/
+    container_name: iterhub-frontend
+    ports:
+      - "8188:80"
+    depends_on:
+      - backend
+    networks:
+      - iterhub-network
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: iterhub-backend
+    ports:
+      - "8008:8000"
+    environment:
+      - MSQL_DSN=mysql+pymysql://iteruser:iterpass123@10.102.201.187:3306/iterdb
+      - HOST=0.0.0.0
+      - PORT=8000
+      # 显式写出(与 backend 默认 400MiB 同值):文档故障的唯一数据源实测 283.6MiB,
+      # 与 nginx 的 client_max_body_size 400m 必须成对保持一致。
+      - MAX_UPLOAD_BYTES=419430400
+    volumes:
+      - ./backend/logs:/app/logs
+    networks:
+      - iterhub-network
+    restart: unless-stopped
+
+networks:
+  iterhub-network:
+    driver: bridge

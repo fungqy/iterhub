@@ -1,0 +1,22 @@
+ZHKS_SONAR_KEY_MAP = {
+    "gnssiot-service" : "zhks-gnssiot-service",
+    "weighbridge-service" : "zhks-weighbridge-service",
+    "drone-inspection" : "zhks-drone-inspection-web",
+    "env-monitor-web" : "zhks-env-monitor",
+    "zhks-envmonitor-project" : "zhks-zhks-envmonitor-project",
+    "equipment-web" : "zhks-equipment-web",
+    "gnssiot-web" : "zhks-gnssiot-web",
+    "矿山门户-前端" : "zhks-menhu-web",
+    "zhks-mmes" : "zhks-product3d-service",
+    "生产三维管控平台-PC端" : "zhks-product3d-web",
+    "smartconstruction-web" : "zhks-smartconstruction-web",
+    "weighbridge-web" : "zhks-weighbridge-web",
+    "zhks-drone" : "zhks-zhks-drone",
+    "zhks-drone-iot" : "zhks-zhks-drone-iot",
+    "zhks-gateway" : "zhks-zhks-gateway",
+    "belt-tear" : "zhks-belt-tear",
+    "belt-tear-detection" : "zhks-belt-tear-detection",
+    "zhks-modelAnalysis-service" : "zhks-zhks-modelanalysis-service",
+    "zhks-modelconv-service" : "zhks-zhks-modelconv-service",
+    "zhks-modelmanage-serv" : "zhks-zhks-modelmanage"
+}

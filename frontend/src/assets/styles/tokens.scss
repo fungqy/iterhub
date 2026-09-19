@@ -1,0 +1,178 @@
+// 设计 token(第 1 层):产品级语义变量,全部页面/组件类由此取值。
+//
+// 两套值:亮色在 :root,暗色在 :root.dark 覆盖。暗色块只需给同名变量赋新值,
+// 消费方(components.scss / 页面)不需要知道当前是哪套。
+//
+// ⚠ 图表 canvas 色不在本文件:ECharts 读不到 CSS 变量(见 2026-09-12 计划 R3),
+//   唯一源是 views/reports/components/chartPalette.ts。此处曾声明过 6 个
+//   --ih-chart-* 变量,但**没有任何 CSS 规则消费它们**(仅存在于注释),
+//   且与 chartPalette 已实际漂移(axisLabel/pieBorder 无对应项),故删除。
+//   新增图表配色请只改 chartPalette.ts,不要在这里找对应项。
+//
+// 暗色开关的三处联动(改一处必须同步另两处):
+//   1. 本文件的 :root.dark
+//   2. main.ts 的 theme.options.darkModeSelector = '.dark'
+//   3. composables/useTheme.ts 给 documentElement 加的类名 'dark'
+:root {
+  /* ── 底 / 面 / 字 ── */
+  --ih-paper: #f9f8f8; /* 暖纸底:主内容区背景 + 表格行 hover */
+  --ih-surface: #ffffff; /* 卡面:卡片/表格容器背景 */
+  --ih-surface-sunken: #f4f5f7; /* 卡内下凹面板底:比卡面低一档,用于把「小标题 + 内容」
+                                   框成一个整体(消费方 .ds-panel,如报表页 Sprint 时间轴)。
+                                   刻意比 --ih-paper(#f9f8f8)深一点点 —— 面板贴在白卡上,
+                                   若复用纸底色,那 2%(6/255)的差在白卡上几乎看不出来,
+                                   起不到「成组」的作用。 */
+  --ih-ink: #1e232c; /* 正文墨字 */
+  --ih-ink-strong: #0f0f0f; /* 标题强墨字 */
+  --ih-ink-muted: rgba(30, 35, 44, 0.65); /* 次要文字。
+                                        0.6 → 0.65 是 2026-09-14 的对比度修正:
+                                        0.6 对白卡面仅 4.25:1、对暖纸底 #f9f8f8 仅 4.01:1,
+                                        都低于 WCAG AA 正文线 4.5:1(侧栏导航未选中项、
+                                        页头副标题、.ds-meta 全是这个色)。
+                                        2026-09-15 起**表格表头不再消费本变量**(改用
+                                        --ih-ink-strong),但上面三个消费方仍在,故 0.65 不动。
+                                        0.65 → 白底 4.97:1 / 纸底 4.69:1,两处都过线,
+                                        而视觉上只比原先深一档,基本看不出差别。 */
+  --ih-ink-faint: rgba(30, 35, 44, 0.4); /* 极淡(仅"—"占位,不得用于需阅读的文案) */
+
+  /* ── 线 ── */
+  --ih-line: rgba(9, 45, 78, 0.12); /* 发丝边 */
+  --ih-line-soft: rgba(9, 45, 78, 0.07); /* 行分隔 */
+  --ih-line-strong: rgba(9, 45, 78, 0.28); /* 强分隔线:两个消费方都是「表的一开一合」——
+                                           表头下缘,与表尾合计行的上缘(2026-09-17 补)。
+                                           表头与表体同色系后,这 2px 线是两者之间
+                                           **唯一**的视觉分隔 —— 12% 的 --ih-line 太淡,
+                                           加宽到 2px 只会糊成一条软带。非「line 的加粗版」,
+                                           而是独立角色:线要「被看见」时用它。 */
+  --ih-hover: rgba(9, 45, 78, 0.07); /* 悬停底:侧边栏导航项 / 用户区。
+                                        与 --ih-line-soft 同基色 → 悬停底与线条同色系;
+                                        **不是** line 的别名,两者角色不同,可各自演化 */
+
+  /* ── 表单控件:边框与形状(PrimeVue 语义 token 覆写)──
+     口径(2026-09-15 用户要求):全站输入框 / 下拉框 / 按钮 = 工作台页头「日期药丸」那一圈线,
+     即 `1px solid var(--ih-line)` + 胶囊圆角。
+     输入类控件(InputText / Password / InputMask / Select / DatePicker / InputNumber)都消费
+     form-field 这两个变量,覆写一次即全部跟随,且 PrimeVue 自己的 hover / invalid / focus
+     派生逻辑继续工作 —— 这里只改「基础色与形状」,不碰状态色。
+     ⚠ 必须写在本文件(无 @layer):主题的 :root 定义在 primevue 层,无层作者样式优先。
+       若写进 components.scss(@layer ds)会压不过组件自身的变体规则(如 .p-button-text 的透明边框)。
+     ⚠ 组合件的分段圆角 token 够不到 —— DatePicker 的「输入框(左圆角)+ 日历钮(右圆角)」、
+       SelectButton 的「首/中/尾」三段,都是逐段写死的值;那部分在 components.scss
+       的「表单控件形状」区块用类覆写补。 */
+  --p-form-field-border-color: var(--ih-line);
+  --p-form-field-border-radius: var(--ih-radius-pill);
+  --p-button-border-radius: var(--ih-radius-pill);
+
+  /* ── 品牌 / 点缀 ── */
+  --ih-accent: #4d6bfe; /* 点缀蓝:焦点环、选中态 */
+  --ih-brand: #aadb1e; /* 品牌绿。仅用于填充,禁做文字色(对白底仅 1.6:1) */
+  --ih-brand-text: #415a0b; /* 品牌绿的文字替代色(primary-900) */
+  --ih-brand-soft: #ecfccb; /* 品牌绿浅底:导航选中态的填充(原取自 primary-100,
+                               但那是原始调色板、暗色下不翻转,已改为本变量) */
+  --ih-on-accent: #ffffff; /* 彩色填充上的文字色。区别于 --ih-surface ——
+                              后者在暗色下会变深,直接拿来当"白字"会在渐变卡上不可读 */
+
+  /* ── 状态 ── */
+  --ih-status-info: #0284c7;
+  --ih-status-success: #16a34a;
+  --ih-status-warn: #d97706;
+  --ih-status-danger: #dc2626;
+
+  /* ── 圆角 ── */
+  --ih-radius-sm: 8px;
+  --ih-radius-md: 16px; /* 卡片 */
+  --ih-radius-pill: 999px; /* 药丸 */
+  // 注:原 --ih-radius-lg(20px,页面壳专用)已随页面壳整层撤销而删除 ——
+  // 它是该层唯一的消费方,留着就是死 token。
+
+  /* ── 间距 ── */
+  --ih-pad-base: 1rem; /* 主内容区内边距 · 卡片内边距,两者共用同一值。
+                          它们原本各写各的 1rem(.app-content 那处是用户手调后定下的基准值),
+                          手改一处忘改另一处就会错位,故收成同一个 token。
+                          消费方:.app-content(base.scss)、.ds-card .p-card-body(components.scss)。 */
+
+  /* ── 阴影 ── */
+  --ih-shadow-card: 0 8px 20px rgba(15, 15, 15, 0.12); /* 统计卡投影 */
+
+  /* ── 弹窗遮罩(压暗 + 背景模糊)── */
+  --ih-scrim: rgba(0, 0, 0, 0.3); /* 遮罩的不透明度:背景页被压暗 30%,即透出 70%。
+                                     语义是「遮罩自身有多不透明」——值越大背景越看不见,
+                                     别按「背景有多透明」去理解同一个数。
+                                     消费方:components.scss 的 .p-dialog-mask。
+                                     原始取值为 PrimeVue Aura 默认的亮色 0.4 / 暗色 0.6,
+                                     这里按需求统一压到 0.3(见 :root.dark 处的说明)。
+                                     若只想要模糊、不要压暗,改成 rgba(0, 0, 0, 0)。 */
+  --ih-scrim-blur: 4px; /* 遮罩对「背后页面」的模糊半径(压暗之外的失焦量)。0 = 关闭模糊、退化为纯压暗。
+                           取 4px 的理由:14px 正文与页头标题在这个半径下均已不可读(目的达成),
+                           同时页面区块轮廓还看得见,不会糊成一片纯色块。
+                           嫌不够彻底给 8px,想含蓄一点给 2px —— 改这一处即可。 */
+
+  /* ── 弹窗尺寸四档 ── */
+  --ih-dialog-sm: min(500px, 95vw); /* 确认类:ManualExecuteDialog */
+  --ih-dialog-md: min(760px, 95vw); /* 表单/单表:ProjectList 编辑、BugInstanceDetailDialog、ReopenMembersDialog、TeamMembersDialog */
+  --ih-dialog-lg: min(1200px, 95vw); /* 宽表:DocBugImport、ReportReopenDialog、AvgTimeDevelopersDialog、BurndownDialog、SprintSummaryDialog、UnplannedStoriesDialog */
+  --ih-dialog-xl: min(1360px, 95vw); /* 最宽表:BugDetailDialog、BugListDialog */
+
+  /* ── 统计卡渐变 ── */
+  --ih-grad-total: linear-gradient(135deg, #4d6bfe 0%, #7a90ff 100%);
+  --ih-grad-pending: linear-gradient(135deg, #b45309 0%, #d97706 100%);
+  --ih-grad-success: linear-gradient(135deg, #16a34a 0%, #22c55e 100%);
+  --ih-grad-failed: linear-gradient(135deg, #dc2626 0%, #f25a5a 100%);
+}
+
+// ── 暗色 ──
+// 原则:底/面整体下压到近黑,字色反相;点缀色与状态色整体提亮一档 ——
+// 亮色下的深蓝/深绿在暗底上对比度不足(例如 #0284c7 对 #16181d 仅约 3:1)。
+// 品牌绿 #aadb1e 本身在暗底上对比充足,保持原值。
+:root.dark {
+  /* 底 / 面 / 字 */
+  --ih-paper: #16181d;
+  --ih-surface: #1e2128;
+  /* 下凹面板底:暗色下靠「比卡面略亮」表达同一层级(深色主题里抬升=提亮),
+     方向与亮色的「压暗」相反,与 --ih-hover 的处理一致。 */
+  --ih-surface-sunken: #262932;
+  --ih-ink: #e6e8ec;
+  --ih-ink-strong: #f5f7fa;
+  --ih-ink-muted: rgba(230, 232, 236, 0.62);
+  --ih-ink-faint: rgba(230, 232, 236, 0.4);
+
+  /* 线:亮色用深色透明,暗色改用白色透明才能看见 */
+  --ih-line: rgba(255, 255, 255, 0.14);
+  --ih-line-soft: rgba(255, 255, 255, 0.08);
+  --ih-line-strong: rgba(255, 255, 255, 0.28); /* 强分隔线:与亮色同为 28%,
+                                                  只是方向从「压暗」翻成「提亮」 */
+  --ih-hover: rgba(255, 255, 255, 0.08); /* 悬停底:暗底上需「提亮」,
+
+                                           与亮色的「压暗」方向相反 */
+
+  /* 品牌 / 点缀 */
+  --ih-accent: #7c93ff;
+  --ih-brand: #aadb1e;
+  --ih-brand-text: #b9e556; /* 暗底下用浅绿做文字(primary-900 在暗底不可读) */
+  --ih-brand-soft: rgba(185, 229, 86, 0.16); /* 品牌绿浅底:取 --ih-brand-text 同色
+                                               (#b9e556)加透明度。与 PrimeVue 暗色
+                                               highlight(primary-400 @84% 透明)同值 */
+  --ih-on-accent: #ffffff; /* 渐变填充上的文字仍为白色 */
+
+  /* 状态 */
+  --ih-status-info: #38bdf8;
+  --ih-status-success: #4ade80;
+  --ih-status-warn: #fbbf24;
+  --ih-status-danger: #f87171;
+
+  /* 阴影:暗底上需要更重的投影才能与背景分离 */
+  --ih-shadow-card: 0 8px 20px rgba(0, 0, 0, 0.5);
+
+  /* 圆角、间距与弹窗尺寸不随主题变化,无需覆盖 */
+
+  /* 遮罩同理不翻转:亮暗共用 --ih-scrim(0.3)与 --ih-scrim-blur(4px)。
+     注意 Aura 暗色默认是 0.6 —— 比亮色更深。若暗色下觉得弹窗与背景糊在一起,
+     在下方取消注释即可单独加深,亮色不受影响:
+       --ih-scrim: rgba(0, 0, 0, 0.45); */
+
+  /* 统计卡渐变:与亮色保持同色系,但整体压暗,避免在暗底上刺眼 */
+  --ih-grad-total: linear-gradient(135deg, #3c56d6 0%, #5e74e8 100%);
+  --ih-grad-pending: linear-gradient(135deg, #8f4208 0%, #b4620a 100%);
+  --ih-grad-success: linear-gradient(135deg, #15803d 0%, #1d9c4b 100%);
+  --ih-grad-failed: linear-gradient(135deg, #b03030 0%, #cf4a4a 100%);
+}

@@ -1,0 +1,12 @@
+// 样式总入口:职责已拆分,本文件仅做转发。
+// 顺序即优先级:token 定义 → 应用壳 → 组件类。
+// tailwind.css 由 main.ts 单独先行导入;PrimeVue 主题层('primevue')
+// 由 main.ts 的 cssLayer 选项注入,
+// 顺序 'theme, primevue, ds, utilities' 须与 tailwind.css 的 @layer 声明对齐(R2)。
+// @import "./tokens.scss";
+// @import "./base.scss";
+// @import "./components.scss";
+
+@use "./tokens" as *;
+@use "./base" as *;
+@use "./components" as *;

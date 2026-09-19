@@ -1,0 +1,1663 @@
+// 设计系统组件类(第 2 层):全局、非 scoped,全部取值于 --ih-* token。
+// 规则:`.p-*` 覆写只允许出现在下方「PrimeVue 内部覆写」区块,页面文件禁止。
+// 本文件零硬编码色值(grep hex/rgba 应零命中,注释除外)。
+// 整文件裹进 @layer ds,层序 'theme, primevue, ds, utilities'(见 tailwind.css):
+// ds 覆写 PrimeVue,utilities 覆写 ds(同属性并用时工具类胜)。
+@layer ds {
+
+/* ── PrimeVue 内部覆写(唯一允许位置)── */
+// 注:原 `.app-header.p-toolbar` 覆写已随顶栏整条移除而删除。
+// 顶栏曾是应用壳里唯一用 PrimeVue Toolbar 的地方,现在全应用已无 .p-toolbar
+// 消费方,该覆写对应的自定义高度 60px / 下边框一并消失,不再需要 0 值兜底。
+
+/* ── 表单控件形状:与工作台页头「日期药丸」同款(2026-09-15 用户要求)──
+   口径:全站输入框 / 下拉框 / 按钮 = `1px solid var(--ih-line)` + 胶囊圆角。
+   分工(为什么不能只在一处做):
+     · 边框色 + **单体控件**的圆角 → 在 tokens.scss 覆写 PrimeVue 的
+       --p-form-field-border-color / --p-form-field-border-radius / --p-button-border-radius。
+       必须放无层的 tokens.scss 才压得住主题(理由写在该处)。
+     · 本区块只补 token **够不到**的三类组合件 —— 它们的圆角是逐段写死的值:
+         ① DatePicker  : 输入框(左半) + 日历触发钮(右半)拼成一个胶囊
+         ② SelectButton: 首 / 中 / 尾 三段各写各的圆角
+         ③ ToggleButton: 连圆角 token 都没有(--p-togglebutton-border-radius 未定义)
+       外加按钮的边框色 —— 变体规则特异性高于裸 .p-button,须逐变体列出才盖得住。 */
+
+// ① 日期选择器:输入框与日历钮各取一半圆角,拼起来才是完整胶囊
+.p-datepicker .p-datepicker-input {
+  border-radius: var(--ih-radius-pill) 0 0 var(--ih-radius-pill);
+}
+
+.p-datepicker .p-datepicker-dropdown {
+  border-radius: 0 var(--ih-radius-pill) var(--ih-radius-pill) 0;
+}
+
+// 下拉框右侧图标区:自身无边框,但 hover 有底色 —— 圆角不跟着走,
+// 鼠标移上去时那块底色会溢出到胶囊轮廓之外(四角露出直角)。
+.p-select .p-select-dropdown {
+  border-radius: 0 var(--ih-radius-pill) var(--ih-radius-pill) 0;
+}
+
+// ② 分段按钮:容器与首尾段分走半圆,中段保持直角 ——
+// 中段若也给圆角,相邻两段的圆角会互相啃出缺口。
+.p-selectbutton {
+  border-radius: var(--ih-radius-pill);
+
+  .p-togglebutton {
+    border-radius: 0;
+
+    &:first-child {
+      border-radius: var(--ih-radius-pill) 0 0 var(--ih-radius-pill);
+    }
+
+    &:last-child {
+      border-radius: 0 var(--ih-radius-pill) var(--ih-radius-pill) 0;
+    }
+  }
+}
+
+// ③ 独立开关按钮(不在 SelectButton 里时):无圆角 token,须自己写。
+//    边框色同样统一 —— 它原本的边框色等于自身底色(--p-button-secondary-border-color),
+//    改成 --ih-line 后浅灰块会显出一圈轮廓。
+.p-togglebutton {
+  border-radius: var(--ih-radius-pill);
+  border-color: var(--ih-line);
+}
+
+// ④ 按钮:所有变体的边框统一成同一圈线。
+// ⚠ 必须逐变体列出:Aura 的变体规则(如 `.p-button.p-button-text`)特异性高于裸 `.p-button`,
+//   只写 `.p-button` 会被它们盖回去 —— text 变体那个「透明边框」就是这么来的。
+.p-button,
+.p-button.p-button-text,
+.p-button.p-button-outlined,
+.p-button.p-button-link,
+.p-button.p-button-secondary,
+.p-button.p-button-rounded {
+  border-color: var(--ih-line);
+}
+
+// 卡片内边距与主内容区内边距同源(tokens.scss 的 --ih-pad-base)。
+// 原先两处各写各的 1rem,改一处忘一处就错位,故收成同一个 token。
+.ds-card .p-card-body {
+  padding: var(--ih-pad-base);
+}
+
+.ds-card .p-card-title {
+  font-size: 1rem;
+  font-weight: 350;
+  color: var(--ih-ink-strong);
+}
+
+// 环图卡(BugChartCard):标题与环图共用同一段纵向空间。
+// 产品要求环图外沿顶边与卡片标题**顶边**齐平 —— 标题若留在文档流里,它必然把图表整块压到
+// 自己下方(环顶最多只能到标题底边)。故把 title 所在的 .p-card-caption 整块取出文档流:
+// 图表容器成为 body 里唯一的流内子元素,顶边＝body 内容区顶边;caption 用同一个
+// --ih-pad-base 定位,盒顶边与它重合 —— 两者天然齐平,且卡片省掉整个标题行的高度。
+//   · top 必须与 .ds-card .p-card-body 的 padding-top 用同一个 token,否则又错开。
+//   · pointer-events:none 是必需的:caption 是一条横贯卡片的窄横幅,正好压在环顶弧线上,
+//     不关掉指针命中,环最上面一段分片就 hover 不出 tooltip(标题本身不需要交互)。
+// ⚠ caption 横贯整卡,但文字墨迹只占左侧一小段(1440 视口实测 68×25)。环图自 2026-09-15
+//   起改为「环 + 右侧竖排图例」两列并刻意左靠,标题右下角与环外圆的净间隙因此由 53.3px
+//   收窄到 ≈24px —— 这个间隙改由 .ds-ring-plot 的 margin-left 主动保证,不再是"顺带成立"。
+//   ⚠ 改标题文案(字数)或字号都会移动墨迹右端,那个偏移必须跟着重算。
+// ⚠ caption 是**整卡宽**的绝对定位盒:左靠后的环与右侧图例都落在它的横向范围内,
+//   pointer-events:none 因此是必需的 —— 否则环顶 hover 不出 tooltip、右侧图例也点不动。
+// 环图自身的定位见 BugChartCard.vue 的 RING_* 常量。
+.ds-card.ds-chart-card .p-card-body {
+  position: relative;
+  gap: 0;
+}
+
+.ds-card.ds-chart-card .p-card-caption {
+  position: absolute;
+  top: var(--ih-pad-base);
+  left: var(--ih-pad-base);
+  right: var(--ih-pad-base);
+  pointer-events: none;
+}
+
+// ── 环图卡的「环 + 右侧竖排图例」两列(2026-09-15)──────────────────
+// 目的:把图例从环的**下方**移到**右侧**竖排。原先「环容器 184 + 图例行 28」纵向相加
+// = 卡高 246;改成两列后卡高由较高的那一列决定(环 184),实测 216(-30),且图例条数
+// 再多也只占右列 —— 改前 8 条会把卡片从 246 顶到 278。
+.ds-card.ds-chart-card .ds-ring-layout {
+  display: flex;
+  // flex-start 是必需的:图例比环高时(条数多),center 会把环往下压,
+  // 「环外沿顶边 = body 内容区顶 = 标题顶边」的齐平关系就没了。
+  align-items: flex-start;
+  // wrap 是降级路径:卡片窄到放不下两列时图例自动落到环下方,退回改动前的纵向排列
+  // (卡片变高),而不是把图例挤成一条缝。行间距同时充当降级态「环 → 图例」的间隔
+  // (取代原先图例自带的 pt-2)。
+  flex-wrap: wrap;
+  // 0.75rem(12px) → 0.5rem(8px),2026-09-17:为「1366 三列」让出 4px(见 .ds-ring-plot 的下调说明)。
+  gap: 0.5rem;
+}
+
+// 环的绘图容器:尺寸由组件内联绑定(RING_PLOT_W × RING_BOX_H),这里只管两件事 ——
+// 不被 flex 拉伸、以及相对内容区左边缘的偏移。
+// 偏移的来历:环顶边与标题顶边齐平(见上方 .p-card-caption 段),环一旦左移,它的
+// **左上弧线**就会压到标题文字上。约束项是标题墨迹的右下角(实测 68×25):
+//   净间隙 = hypot(环心x − 68, 环心y − 25) − 外半径88
+// 环心在本容器内恒在 x=100(RING_PLOT_W/2)、y=88,故容器左偏移 L 对应环心 x = L + 100。
+// 取 L=62 → 环心 x=162 → 净间隙 ≈24px(改动前环居中于内容宽 394.66,环心 x=197.5,净间隙 53.3px)。
+// ⚠ 标题墨迹右端是唯一约束项:改标题文案(字数)或字号,这个偏移必须跟着重算。
+// ⚠ 改 RING_PLOT_W 也要跟着改这里 —— 环心在容器内的位置随它走。
+//
+// ── 2026-09-17 下调 L: 62 → 50 ──
+// 起因:要求「1366 视口下三张环图卡仍为 3 列」。而 3 列 @1366 的卡片内容宽只有 373.89px,
+//   小于不换行阈值 386(= L 62 + plot 200 + 列间距 12 + 图例 112),差 12px ⇒ 图例必掉下方。
+//   62 是 386 里弹性最小的一项(plot 200 由环几何定死、112 只影响判据不影响实际列宽),
+//   故由它让出 12px 中的 8px,列间距再让 4px(见 .ds-ring-layout 的 gap)。
+// 代价:净间隙 29 → 19.2px(探针 91 实测;同组对照 L=54 → 22.4、L=44 → 14.4)。
+//   仍为正值、不与标题墨迹重叠;这是「保 3 列」的对价,若要 24px 以上需放弃 1366 三列。
+.ds-card.ds-chart-card .ds-ring-plot {
+  flex: none;
+  margin-left: 3.125rem; // 50px,推导见上
+}
+
+// 右侧图例列。
+// flex-basis / min-width 取 6.25rem(100px):「左列 50+200」+「列间距 8」+「100」= 358px,
+// 要小于卡片内容宽才不会换行(1366 三列时实测 373.89px,余 15.9px)。
+// 调窄卡片时先撞到这个 100px 下限而换行,不会出现「图例被压成一条缝」的中间态。
+//
+// ── 2026-09-17 下调 7rem(112) → 6.25rem(100) ──
+// ⚠ 关键认知:min-width **只决定换行判据,不决定实际列宽**。
+//   实际列宽 = 内容宽 − 左列 − 列间距,由 flex-grow 分配;探针 91 实测
+//   min-width 取 112 / 104 / 100 时列宽**都是 115.9px**、文字都单行、卡高都是 218。
+//   ⇒ 既然显示无差别,就该选**余量最大的**:余量 3.9 → 11.9 → 15.9px。
+//   别把它误当成"图例变窄"—— 想真改列宽要动的是左列或列间距,不是这里。
+// 原 112 的注释存档:1440 视口下内容宽 394.66,余 8.66px;实际宽度被补到 ≈121px。
+.ds-card.ds-chart-card .ds-ring-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  flex: 1 1 6.25rem;
+  min-width: 6.25rem;
+  // 竖向居中于环:条目少时(如级别分布只有 3 条)贴着标题排会显得上重下轻。
+  // 不影响上面那条「环顶贴内容区顶」—— 环自身仍是 flex-start。
+  // 换行到独立一行时本行的 cross size 就是自身高度,居中自然退化为空操作。
+  align-self: center;
+}
+
+// 降级态:容器窄到放不下两列(见上,阈值 358px,由 .ds-ring-layout 的 wrap 决定)
+// 时,图例被换到环下方独占一行 —— 此时它必须**回到横向换行**的排法。
+// 否则一列竖排(4 条 = 104px)会比改动前横排的两排(≈48px)还高,窄屏下卡片反而变高:
+// 实测 1200 视口下卡高 334px,而改动前同视口约 274px。
+// 用容器查询而不是媒体查询:阈值取决于**卡片**宽度,而它由弹窗宽度决定,
+// 媒体查询要换算成视口断点,弹窗尺寸一调就失配。
+//
+// ⚠⚠ 这个数是换行阈值减 1(386−1=385 → 358−1=357),与 .ds-ring-legend 的 min-width
+//   **强联动**:只改 min-width 不改这里,会出现「图例明明在右侧列、却被摆成横排」的
+//   坏状态 —— 探针 91 第一版就撞到了(内容宽 373.89 ≤ 385 仍触发横排)。
+//   改任一侧都必须同步另一侧。
+.ds-card.ds-chart-card .ds-ring-layout {
+  container-type: inline-size;
+}
+
+@container (max-width: 357px) {
+  .ds-card.ds-chart-card .ds-ring-legend {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    align-self: stretch;
+    gap: 0.5rem 0.75rem;
+  }
+}
+
+// 图例圆点是定尺寸元素:不加 flex-shrink:0 的话,条目内容超出列宽时会先被压缩,
+// 圆点变成椭圆(见 base.scss 顶部同类说明)。压缩应全部由文字换行吸收。
+.ds-card.ds-chart-card .ds-ring-dot {
+  flex: none;
+}
+
+// ── 环图卡的网格:列数自适应,保证每列内容宽恒 ≥ 386(2026-09-17)────────────
+// 为什么不能沿用 `grid-cols-1 lg:grid-cols-3`:386 是「环 + 右侧图例」不换行的阈值
+// (推导见上:.ds-ring-plot 的 margin-left 62 + 200 + gap 12 + 图例 min-width 112),
+// 而 lg 是 **Tailwind 视口断点**,卡片实际宽度却由「弹窗宽 → 列数 → 内容宽」推出 ——
+// 两者不同源,于是图例位置随视口**非单调**:
+//   视口 900(1 列) 内容宽 779 → 右侧
+//   视口 1366(3 列) 内容宽 373.9 → 下方   ← 最常见的笔记本宽度,正好掉在区间里
+//   视口 1440(3 列) 内容宽 397.3 → 右侧
+// 即「窄屏反而对、中等屏反而不对」。实测临界视口 ≈ 1405。
+//
+// 改法:列数交给 auto-fit 按**实际可用宽**决定,每列下限 400px
+//   = 内容宽下限 358 + 卡片左右 padding 各 16 + 26px 余量。
+//   ⚠ 下限只决定**列数**,实际列宽由 1fr 拉伸(1366 三列时每列 406px > 400),
+//     ⇒ 想要更宽的列是调下限,想要更稳的换行判据是调 min-width,两者不是一回事。
+//   400 这个取值保证 1366 视口下能排 3 列(floor((1250+16)/(400+16)) = 3);
+//   取 420 时只能排 2 列 —— 那是 2026-09-17 第一版,因用户要求「1366 必须 3 列」而下调。
+//
+// ⚠⚠ `minmax(400px, 1fr)` 必须写成 `minmax(min(400px, 100%), 1fr)`:
+//   auto-fit 下若容器窄于 400px,前者仍会生成一列**宽 400px** 的轨道 ⇒ 横向溢出
+//   (视口 375 时内容宽约 308,会溢出约 92px)。套一层 min(…, 100%) 才让下限跟着容器收。
+//
+// ⚠ 400 与 .ds-ring-layout 的 358 阈值联动:若改动 margin-left 50 或图例 min-width,
+//   必须同步重算本值(= 新阈值 + padding 32 + 余量)。
+.ds-ring-card-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(min(400px, 100%), 1fr));
+}
+
+// 趋势图卡(MetricsTrendChart)副标题:图例项与右侧「| 点击查看…」提示是同一排的两类小字,
+// 字号必须一致 —— Aura 的 card.subtitle 段只定义了 color、没定义 font-size,
+// 于是图例项继承根字号 16px,而提示是 .ds-meta(0.875rem/14px),同排出现两档字号。
+// 整条副标题统一到 0.875rem 后,两者相等(提示项自身的 .ds-meta 也是这个值,不冲突)。
+// ⚠ 作用域限定在趋势图卡:Jobs 页 ManualExecutePanel 的副标题是单独的提示文案,
+//   不属本次需求,挂到 .ds-card 上会把它一起改掉。
+.ds-card.ds-trend-card .p-card-subtitle {
+  font-size: 0.875rem;
+}
+
+// 主按钮:白字对品牌绿 primary-500 仅 1.6:1,不可读;底色加深到 primary-700。
+// 有意变更(见计划 Task 13):合规优先,离品牌绿稍远,逐页目视确认。
+// 作用域:主内容区 + 弹窗。弹窗是 teleport 到 body 的,不在 .app-content 内,
+// 必须并列写出,否则弹窗里的主按钮会退回不可读的品牌绿。
+// ⚠ border-color 于 2026-09-15 由 var(--p-primary-700) 改为 --ih-line:
+//   用户要求「所有按钮边框统一成药丸同款」。原先刻意与底色同色是为了让主按钮保持
+//   实心无描边,现在按新口径加上描边 —— 合规性不受影响,那条要求的对象是
+//   **底色 vs 文字**的对比度,底色仍为 primary-700 未动。
+.app-content .p-button:not(.p-button-text):not(.p-button-outlined):not(.p-button-link),
+.ds-dialog .p-button:not(.p-button-text):not(.p-button-outlined):not(.p-button-link) {
+  background: var(--p-primary-700);
+  border-color: var(--ih-line);
+}
+
+// Steps 在浅底上标题对比不足时兜底
+.ds-dialog .p-steps-item-title {
+  color: var(--ih-ink);
+}
+
+// 弹窗头部「放大/关闭」两个圆形图标按钮统一不带圆环(产品要求)。
+// 现象成因:打开弹窗时 PrimeVue 把初始焦点落在第一个可聚焦元素(有 maximizable
+// 时即放大按钮),命中 :focus-visible 带出 Aura 的 focusRing(outline 1px solid
+// surface.600 + offset 2px)——关闭按钮只是没拿到焦点才没有,两者样式本身一致。
+.p-dialog-header-actions .p-button:focus-visible {
+  outline: none;
+}
+
+// 弹窗高度上限:整窗(页头 + 内容 + 页脚)最多占视口 95%。
+// ⚠ 必须写全局(本区块),不能写 SFC 内的 :deep(.p-dialog) —— Dialog 默认 teleport
+// 到 <body>,脱离了打开它的组件 DOM 子树,scoped 样式(含 :deep)都够不到它。
+// 本区块是项目指定的「PrimeVue 内部覆写」唯一落点,正好承担这个穿透。
+// 百分比基准来自 .p-dialog-mask(fixed; inset:0 → 视口高),故 95% ≈ 95vh;
+// 内容区 .p-dialog-content 自带 flex:1 + overflow:auto,超出部分在内容区内部滚动,
+// 而不是整窗顶出视口。仅想约束某一档尺寸时,可改为 .p-dialog.ds-dialog-lg 等。
+.p-dialog {
+  max-height: 95%;
+}
+
+// 放大态弹窗的圆角:补回普通态同款,与「Sprint 概览」等非放大弹窗一致。
+// ⚠ 放大态由 .p-dialog-maximized 提供(见 constants/dialogPt.ts),其规则里把
+//   border-radius 写死为 0(主题给 .p-dialog 设的 dt('dialog.border.radius') 被抹平),
+//   于是这些弹窗是全直角。用户 2026-09-17 要求「所有直角弹窗统一成概览弹窗的圆角」,
+//   这里就取同一个 token —— 即 .p-dialog 用的 dt('dialog.border.radius')
+//   (= border.radius.xl = 12px),两者同源,日后改主题圆角不会脱节。
+// ⚠ 本文件在 ds 层(晚于 primevue 层),与原规则同特异性即可胜出,不需要 !important。
+// ⚠ .ds-image-viewer(纯图片弹窗)本体已 transparent + 无描边/阴影,圆角对它不可见,
+//   不必单独排除。
+.p-dialog-maximized {
+  border-radius: var(--p-dialog-border-radius, 12px);
+}
+
+// ── 「只显示图片」的弹窗(BugInstanceDetailDialog 的原图弹窗,根节点带 .ds-image-viewer)──
+// 用户 2026-09-17:去掉边框与标题,只显示图片。这里承载**弹窗本体**的三条可视线索:
+//   ① 边框:主题给 overlay.modal 的 1px 描边;
+//   ② 底色:主题的 overlay.modal 背景(一块比遮罩亮的矩形);
+//   ③ 阴影:主题的 overlay.modal 投影。
+// ⚠ 三条必须一起去掉。只删那 1px 描边的结果是「描边没了,但矩形还在」—— 用户说的「边框」
+//   是屏幕上看得到的那圈轮廓,底色与阴影各贡献一半,少删一条就还是原来那张卡片。
+// ⚠ 页头不在这个区块处理:它是模板里的 `:show-header="false"`(公开 prop),不必用 CSS 藏,
+//   藏了还会留下带内边距的空盒、把图片往下挤。
+// ⚠ 内容区 padding 归零 + position:relative 是给图片那一层做**定位基准**:
+//   SFC 里的 .docbug-fullview 用 inset 铺满内容区,有基准才有确定高度,
+//   图片的 max-height:100% 才解得出来(推导见该文件内的注释)。
+.p-dialog.ds-image-viewer {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+.p-dialog.ds-image-viewer .p-dialog-content {
+  position: relative;
+  padding: 0;
+  // 图片已按内容区双限缩放(见 .docbug-fullimg),不存在需要滚动的溢出;
+  // 留 hidden 只是兜住取整误差,免得平白多出一条 1px 滚动条。
+  overflow: hidden;
+}
+
+// 弹窗本体动效节奏:进 240ms / 出 180ms(退出比进入快 —— 人眼对退出的容忍度更低)。
+// 为什么要改(2026-09-15 逐帧实测 opacity,探针 cdp-drive57.mjs):
+//   主题默认进出都是 300ms + cubic-bezier(.19,1,.22,1),该曲线前段极陡 ——
+//   实测关闭时 opacity 在 **106ms(约 1/3 时长)就掉到 0.082**(已基本看不见),
+//   却仍要占满 300ms 才移除元素 ⇒ 后 2/3 时长属于「看不见的空转」,
+//   观感即「啪一下没了、然后卡住」。打开同理:前段弹到位、后段慢磨 = 黏。
+// 两件事:① 时长分进出;② 换掉前段过陡的曲线,让速度分布更均匀。
+// ⚠ 改这里的时长会连带改变遮罩的存活窗口 —— 遮罩要到内层 transition 的 after-leave
+//   才被移除,所以它的 leave 动画必须 ≥ 这里的 leave(见下方遮罩区块)。
+.p-dialog-enter-active {
+  animation-duration: 240ms;
+  animation-timing-function: cubic-bezier(0.05, 0.7, 0.1, 1);
+}
+
+.p-dialog-leave-active {
+  animation-duration: 180ms;
+  animation-timing-function: cubic-bezier(0.3, 0, 0.8, 0.15);
+}
+
+// 模态遮罩(弹窗/确认框背后的「压暗 + 背景失焦」层)。
+// ⚠ 背景色不能直接写 background:`.p-overlay-mask` 的背景有**两处**取值 —— 静态规则,
+// 以及入场动画 p-animate-overlay-mask-enter 的 to 帧;该动画是 fill-mode:forwards,
+// 结束后仍持续生效,所以只写 background 会被动画终帧原样盖回去(改完看不到变化)。
+// 这两处都读同一个逃生口 --px-mask-background(定义在 @primeuix/styles 的 base 层),
+// 给它赋值即可同时改掉「静态态 + 淡入终态」,且不必碰入场动画本身。
+// 覆盖范围:Dialog 与 ConfirmDialog(后者内部复用 Dialog,共用 .p-dialog-mask)。
+// 取值见 tokens.scss 的 --ih-scrim / --ih-scrim-blur。
+//
+// backdrop-filter:模糊「遮罩背后已绘制的一切」,即整页内容。遮罩固定定位铺满视口,
+// 所以侧边栏、页头、卡片一起失焦。⚠ 弹窗是遮罩的**子元素**,不参与遮罩的 backdrop,
+// 因此弹窗自身保持清晰 —— 这正是「背景糊、弹窗清」的成因,别把这条规则挪到 .p-dialog 上。
+.p-dialog-mask {
+  --px-mask-background: var(--ih-scrim);
+  -webkit-backdrop-filter: blur(var(--ih-scrim-blur));
+  backdrop-filter: blur(var(--ih-scrim-blur));
+}
+
+// 让模糊跟着入场动画一起推进。
+// 主题的入场动画只动 background;若只在上面的基础规则里写 backdrop-filter,
+// 模糊会在第 0 帧**整体弹出来**(0.18s 里背景先糊、后变暗,能看出两段)。
+// 这里在 enter-active 上追加第二条同名动画,只负责 backdrop-filter。
+// 选择器比主题的 .p-overlay-mask-enter-active 多一个类,且本文件在 ds 层(晚于 primevue 层),
+// 双重保证能覆盖到。
+//
+// ⚠ 2026-09-15 实测更正:原文写「遮罩没有离场动画(v-if 直接移除),故无需写 leave 分支」,
+//   这个前提是错的,而且它掩盖着一个真实缺陷(探针 cdp-drive57.mjs 逐帧实测):
+//     ① 遮罩**有** leave 分支 —— Dialog.vue 的 onBeforeLeave 里明确
+//        addClass(this.mask, 'p-overlay-mask-leave-active'),实测确实加上了;
+//     ② 但加了类也**不生效**:遮罩的 enter-active 类**从头到尾不摘**
+//        (实测 class 序列:创建即带 enter-active,关闭时再叠一个 leave-active,
+//         直到元素移除才一起消失)。于是关闭瞬间元素上同时挂着两个类,
+//        而本规则(0,2,0,两个类)特异性 > 主题 .p-overlay-mask-leave-active(0,1,0)
+//        ⇒ 关闭跑的还是**入场**动画;而入场动画早已 fill:forwards 停在终态,
+//        所以「压暗与模糊纹丝不动」。实测关闭全程 background 恒 rgba(0,0,0,.3)、
+//        backdrop-filter 恒 blur(4px),第 308ms 元素移除时一起阶跃消失 ——
+//        观感是「弹窗缩淡了,背景却定住不动,最后啪地跳回去」;
+//     ③ 修法:给 leave 分支显式补一条规则(见下)。它与本规则特异性相同(0,2,0),
+//        靠**源码顺序在后**胜出 ⇒ 关闭时真正跑退场动画。这条顺序依赖是刻意的,
+//        别把下面那段挪到本规则之前。
+//   另:原文说「duration 由主题 shorthand 的单值自动复制、不必重复声明」也不适用了 ——
+//   那会把 0.15s 复制给两条动画,与弹窗的 240ms 节奏不匹配(遮罩会显得先跑完、弹窗还在动),
+//   故现在显式给时长。
+.p-dialog-mask.p-overlay-mask-enter-active {
+  animation-name: p-animate-overlay-mask-enter, ih-scrim-blur-in;
+  // 比弹窗的 enter(240ms)略短:背景先稳定下来、弹窗再落位,这是「背景先行」的层次感。
+  animation-duration: 180ms;
+}
+
+// 关闭:压暗与模糊一起退场。
+// ⚠ 时长必须 ≥ 弹窗的 leave(180ms):遮罩要到内层 transition 的 after-leave 才被移除,
+//   若这段动画更短,就会出现「动画已跑完、元素还挂着」的空转窗口
+//   (旧版本正是 308ms 全程静止,见上方第 ② 条)。
+.p-dialog-mask.p-overlay-mask-leave-active {
+  animation-name: p-animate-overlay-mask-leave, ih-scrim-blur-out;
+  animation-duration: 180ms;
+}
+
+@keyframes ih-scrim-blur-in {
+  from {
+    backdrop-filter: blur(0px);
+  }
+
+  to {
+    backdrop-filter: blur(var(--ih-scrim-blur));
+  }
+}
+
+@keyframes ih-scrim-blur-out {
+  from {
+    backdrop-filter: blur(var(--ih-scrim-blur));
+  }
+
+  to {
+    backdrop-filter: blur(0px);
+  }
+}
+
+// ── 卡内面板:把「小标题 + 内容」框成一个整体的淡色底 ──
+// 用途:一个卡片里同时装了「选项区」和「一块自成体系的内容」时,后者套一层面板,
+// 让标题与内容有共同底色,读起来是一组而不是漂在卡面上(消费方:Reports.vue 的 Sprint 时间轴)。
+// 底部内边距刻意比顶部小:时间轴的横向滚动容器自带 pb-2(8px),两者相加才是真正的下沿留白 ——
+// 若这里也给 1rem,下沿会变成 24px,与上沿 16px 不对称。
+.ds-panel {
+  background: var(--ih-surface-sunken);
+  border-radius: var(--ih-radius-sm);
+  padding: 1rem 1rem 0.5rem;
+}
+
+// ── Sprint 时间轴:滚动视窗 + 两端滚动按钮(Reports.vue)──
+// 需求:去掉横向滚动条,改由两端的 < / > 按钮驱动滚动。
+//
+// 为什么按钮用「占位式隐藏」而不是 v-show/display:none(本区块最重要的一条):
+//   按钮排进布局会收窄滚动视窗,而「是否需要滚动」恰恰是视窗宽度的函数。
+//   若滚到端点时把该侧按钮整个撤出布局,视窗会变宽 → 溢出量变小甚至归零 →
+//   连「还能往回滚」那一侧的按钮也可能跟着消失,那段内容就再也点不到了(功能性回退)。
+//   故:是否入场由 JS 量出的溢出量决定(v-if,只在「装得下 / 装不下」之间翻一次),
+//   滚到端点只切 visibility —— 盒宽保留,视窗几何与另一侧按钮的可达性都不受影响。
+.ds-timeline-viewport {
+  display: flex;
+  // 按钮锚在「轴线」上,而不是在整块里垂直居中:轴线是这条时间轴的视觉主轴,
+  // 且它距格顶是**常量**(见下方时间轴几何第 3 条),内容再长也不会把按钮带着走。
+  align-items: flex-start;
+  gap: 0.25rem;
+}
+
+.ds-timeline-scroll {
+  // 本类只管两件事:横向伸缩 + 隐藏滚动条。
+  // overflow 本身仍由模板上的 Tailwind 工具类负责(与改前一致,不动)。
+  // 必须能收缩(min-width:0),否则内层的 min-width(每点 150px)会直接顶破卡片。
+  flex: 1;
+  min-width: 0;
+  /* 隐藏滚动条 —— 横向滚动已由两端按钮承担。
+     三条属性覆盖不同引擎,缺一条就会在那个浏览器里露出滚动条:
+     Firefox 只认 scrollbar-width,Chromium/Safari/新 Edge 走 ::-webkit-scrollbar,
+     老 Edge/IE 认 -ms-overflow-style。 */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.ds-timeline-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.ds-timeline-nav {
+  flex: none;
+  /* 24px = WCAG 2.2「目标尺寸(最小)」的下限。
+     盒尺寸显式 border-box:本项目没有全局 box-sizing 重置,content-box 下
+     这 1px 边框会把实占宽高各撑到 26px,两个按钮就跑出 4px 的误差。 */
+  box-sizing: border-box;
+  width: 1.5rem;
+  height: 1.5rem;
+  /* 与轴线对齐:轴距滚动视窗顶 32px(实测值,= 日期盒恒一行 + 0.75rem 间距),
+     按钮 24px 居中于轴 ⇒ 上边距 = 32 − 12 = 20px。 */
+  margin-top: 1.25rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--ih-line);
+  border-radius: var(--ih-radius-pill);
+  // 面板底是 sunken 的一档,按钮取卡面底色浮起来,与 .app-user 同一套「对比底」口径
+  background: var(--ih-surface);
+  color: var(--ih-ink-muted);
+  // 图标字号**不在这里设**:`.pi` 自己声明了 font-size:1rem(实测算子仍是 16px),
+  // 写在本规则上会被元素自身的 .pi 规则压掉,变成一条不起作用的死样式。
+  // 16px 字形配 24px 圆是合适的比例,故直接沿用 PrimeIcons 的默认值,不做覆写。
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+// 悬停只提「底与字」,边框色不动(基础规则已是 --ih-line,无需在此重复声明)
+.ds-timeline-nav:hover {
+  background: var(--ih-hover);
+  color: var(--ih-ink);
+}
+
+// 滚到端点:只切 visibility 保留盒宽(理由见上),并让它在命中测试里彻底消失,
+// 免得点到一枚看不见的按钮。视觉隐藏后键盘也无法聚焦,不会留下隐藏的 Tab 停靠点。
+.ds-timeline-nav.is-hidden {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+// ── Sprint 横向时间轴(Reports.vue,根元素带 .ds-timeline)──
+// PrimeVue 横向时间轴的默认几何是「标记点贴单元格左边缘、轴线向右铺满整格」,
+// 于是上下文案只能左右对齐,与轴上的点对不上:实测(1440 视口)日期文字中心比点位
+// 右偏 158px、Sprint 名右偏 102px;且 opposite/content 是 flex:1 的等高盒、文字
+// 各自顶对齐,造成「轴上 73px 空、轴下 25px」的一头沉。
+// 这里按「点位居中 + 轴线穿过点位」重排,四条规则缺一不可:
+//   1. 标记点绝对定位到单元格 1/2 处;
+//   2. 轴线交给 separator 的左右两段伪元素 —— 各画半格,相邻两格恰好拼成
+//      「点位 → 点位」的连续轴;首格藏左段、末格藏右段,轴线不探出两端。
+//      (不用 connector:它只在非末项渲染,且 100% 宽度会把标记点挤小到 16.97px。)
+//   3. 三块全部 flex:none。⚠ 这是本方案的关键:若沿用 flex:1,日期与名称盒会
+//      1:1 平分剩余高度,而「内容高于本盒」的那个盒会触发 min-height:auto 下限、
+//      只把自己撑高 —— 结果同一行里换行的那格轴点会比邻居高/低(实测偏差 12~24px),
+//      轴线断成台阶。改为不伸缩后,轴点高度只由「日期盒(恒为一行)」决定,
+//      每格都从格顶量同一个 2.25rem,恒共线;名称更高的格让整行一起变高即可。
+//   4. 末格保持 flex:1 —— 主题默认 flex:0 会让它收缩到文字宽,末点挤在角落。
+// 单元格高度仍是 min-height:4.5rem(= 轴上方 2.25rem + 0.75rem 间距 + 一行名称 1.5rem),
+// 它现在只是「名称下方没有状态 Tag」这一最小情形的下限,不再留主题 5rem 的空隙;
+// 常态下名称下方还挂着状态 Tag(1.75rem)+ 6px 间距,自然高约 6.625rem,由内容撑开。
+.ds-timeline.p-timeline-horizontal .p-timeline-event {
+  min-height: 4.5rem;
+}
+
+.ds-timeline.p-timeline-horizontal .p-timeline-event:last-child {
+  flex: 1;
+}
+
+.ds-timeline.p-timeline-horizontal .p-timeline-event-separator {
+  position: relative;
+}
+
+.ds-timeline.p-timeline-horizontal .p-timeline-event-marker {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  align-self: center;
+  /* 父盒(separator)是零高盒,若不给正 z-index,它会以 auto(0) 与标记点同层,
+     命中测试在这条重叠线上不稳定(实测第 1 格点到了 separator)。
+     提到 1 层即可让标记点确定性地成为最上层元素 —— 轴线伪元素另有 pointer-events:none 兜底。 */
+  z-index: 1;
+  /* 点位本身也是点击目标:用户会直接点轴上的圆点。键盘可达的目标由 content 里的
+     .ds-timeline-hit 按钮承担,故这里只需要手型光标(圆点只有 16px,单独做 button 包一层
+     会让它回到文档流、破坏上面「三块 flex:none」的轴点对齐前提)。 */
+  cursor: pointer;
+}
+
+.ds-timeline.p-timeline-horizontal .p-timeline-event-connector {
+  display: none;
+}
+
+.ds-timeline.p-timeline-horizontal .p-timeline-event-separator::before,
+.ds-timeline.p-timeline-horizontal .p-timeline-event-separator::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  width: 50%;
+  height: 2px;
+  transform: translateY(-50%);
+  background: var(--ih-line);
+  /* 轴线只是装饰,必须让开命中测试:separator 是零高盒,这两段 2px 伪元素
+     恰好压在「穿过点位的轴线」上,而标记点中心正落在这条线上 ——
+     实测(1440 视口)点第 1 个点位时,elementFromPoint 返回的是 separator 而不是 marker,
+     点击被轴线吃掉、弹窗不弹;末格因右侧半段被隐藏才侥幸能点。
+     交给 pointer-events 让开比调 z-index 更稳:命中测试根本不参与,也就不受层叠顺序影响。 */
+  pointer-events: none;
+}
+
+.ds-timeline.p-timeline-horizontal .p-timeline-event-separator::before {
+  left: 0;
+}
+
+.ds-timeline.p-timeline-horizontal .p-timeline-event-separator::after {
+  right: 0;
+}
+
+.ds-timeline.p-timeline-horizontal .p-timeline-event:first-child .p-timeline-event-separator::before,
+.ds-timeline.p-timeline-horizontal .p-timeline-event:last-child .p-timeline-event-separator::after {
+  display: none;
+}
+
+// 文字与轴上的点同轴:通栏 + 居中(单元格中心即点位中心)
+.ds-timeline.p-timeline-horizontal .p-timeline-event-opposite,
+.ds-timeline.p-timeline-horizontal .p-timeline-event-content {
+  flex: none;
+  text-align: center;
+}
+
+// 日期贴轴线上沿、Sprint 名贴轴线下沿,各自留 0.75rem
+// (标记点半径 9px,故净空 3px;主题自带的上下内边距在此显式覆盖,避免叠加)
+.ds-timeline.p-timeline-horizontal .p-timeline-event-opposite {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0 0 0.75rem;
+}
+
+.ds-timeline.p-timeline-horizontal .p-timeline-event-content {
+  padding: 0.75rem 0 0;
+}
+
+// 时间轴「日期 / Sprint 名称」统一收小一档(用户要求):二者原本都继承根字号 16px,
+// 与下方报表正文抢视觉权重;降到 0.875rem(14px)更贴合「次要轴注」层级。
+.ds-timeline.p-timeline-horizontal .p-timeline-event-opposite,
+.ds-timeline.p-timeline-horizontal .p-timeline-event-content {
+  font-size: 0.875rem;
+}
+
+// 状态那枚 Tag 不再单独收字号(原为 0.6875rem/11px,理由是「别让 chip 反过来比名称还大」)。
+// 用户 2026-09-17 要求「时间轴里的状态也用胶囊样式」⇒ 改由模板挂 `.ds-pill`,
+// 形状与字号整颗走 页头 / 姓名胶囊 那一套(0.75rem、28px、全圆);12px 仍小于名称的 14px,
+// 原来的顾虑依然成立,故那条覆写可以直接撤掉。
+// ⚠ 别在这里再补 font-size:本选择器特异性 (0,4,0) 高于 .ds-pill 的 (0,1,0) ——
+//   补一条只会把胶囊口径**只在这一处**悄悄改掉,页头与姓名那两处不受影响,极难察觉。
+
+// 时间轴这颗状态胶囊上下收紧、不加粗(用户 2026-09-18),口径对齐「故障详情」弹窗里的胶囊
+// (见 BugInstanceDetailDialog 的 .bugdet-field dd :deep(.p-tag)):
+//   · height: auto 交出 .ds-pill 的 28px 定高 —— 定高在 0.75rem 字号下上下各多出数 px 空白,
+//     视觉上就是「上下内边距」;交回内容高后胶囊贴住文字。
+//   · padding-block: 0 与 font-weight: 400 显式写出:主题给 .p-tag 的 padding
+//     (0.25rem 0.5rem)与字重(700)和 .ds-pill 特异性同为 (0,1,0),哪边生效取决于样式注入
+//     顺序;写在本条((0,2,0))让「贴身 + 不加粗」成为不随注入顺序漂移的断言。
+//   · 字号不动(仍走 .ds-pill 的 0.75rem),上面那条「别再补 font-size」的告诫依然有效。
+// ⚠ 只动时间轴这一颗:.ds-pill 的另外两颗消费方(概览页头的状态/日期胶囊)维持 28px/600
+//   的既定口径 —— 想让它们也收紧得改 .ds-pill 本身,别把这一颗的差异写进那里。
+.ds-timeline .ds-pill {
+  height: auto;
+  padding-block: 0;
+  font-weight: 400;
+}
+
+// ── 进行中点位脉冲(Reports.vue 给进行中的 marker 加 .is-live)──
+// ⚠ 主题已占用 marker 的 ::before(内点)与 ::after(内阴影),脉冲只能做在元素自身的
+// box-shadow 上:外阴影画在边框盒之外,既不盖住内点,也不依赖 z-index
+// (用 z-index:-1 补一层光环伪元素会被卡片背景盖住)。
+// 颜色取 --ih-status-warn(橙,与「进行中」标签现在同为橙系),半透明由 color-mix 从 token
+// 现场派生,不在 tokens.scss 外多出一个硬编码色值。
+// ⚠ 内点(::before)另有一条覆写 —— 主题给它的底色是 --p-primary-color(品牌绿),
+//   不覆写会出现「橙色的光环套着一颗绿点」,见下方规则。
+@keyframes ds-timeline-live-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--ih-status-warn) 70%, transparent);
+  }
+
+  70% {
+    box-shadow: 0 0 0 9px transparent;
+  }
+
+  100% {
+    box-shadow: 0 0 0 9px transparent;
+  }
+}
+
+// 9px 扩散半径 = 标记点自身半径,即光环扩到「直径翻倍」后淡尽
+.ds-timeline.p-timeline-horizontal .p-timeline-event-marker.is-live {
+  animation: ds-timeline-live-pulse 1.8s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+// 进行中点位的内点(::before)改橙:主题把它画成 --p-primary-color(品牌绿),
+// 而轴上每个点位都长这样 —— 「当前迭代」此前只靠一圈蓝色光环区分。
+// 现在光环改成橙色后,内点必须同步,否则就是「橙环套绿点」。
+// ⚠ 不带 .is-live 的常规点位保持品牌绿,不动。
+.ds-timeline.p-timeline-horizontal .p-timeline-event-marker.is-live::before {
+  background: var(--ih-status-warn);
+}
+
+// 系统开启「减少动态效果」时不留常驻动画,改为静态光环 —— 状态信息不丢,只是不闪
+@media (prefers-reduced-motion: reduce) {
+  .ds-timeline.p-timeline-horizontal .p-timeline-event-marker.is-live {
+    animation: none;
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--ih-status-warn) 35%, transparent);
+  }
+}
+
+// ── 时间轴点位可点击(点击打开该 Sprint 的迭代概览弹窗)──
+// 点击目标做成 <button>(content 插槽内),而不是给 <li> 挂 click:
+// 按钮是语义正确的可交互元素,键盘 Tab/Enter 天然可用,不必自行补 role 与 keydown。
+// ⚠ 默认外观必须清零。按钮自带 padding/border 且 font 不继承,不清零会改变内容盒宽度 ——
+// 而横向时间轴的「轴点居中」正由 content 盒宽度决定(见上方第 3 条几何说明),
+// 某一格宽度一变,该格轴点就偏,轴线出现台阶。
+.ds-timeline-hit {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  background: none;
+  border: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  /* 按钮的 UA 默认是 text-align:center,会覆盖父级的居中口径并影响文本换行后的对齐;
+     这里显式交还给继承,名称换行时仍按 .p-timeline-event-content 的 text-align 排。 */
+  text-align: inherit;
+  white-space: normal;
+  border-radius: var(--ih-radius-sm);
+}
+
+// 悬停反馈放在名称与 Tag 的**外层**盒上:它们本身是 flex 容器(列向 + items-center),
+// 加在盒内文字上会让 hover 高亮只有文字宽,与下方 Tag 的宽度对不齐。
+.ds-timeline-hit:hover {
+  background: var(--ih-hover);
+}
+
+// 键盘焦点环:必须同时覆盖应用壳(侧边栏的导航项、用户区、底部按钮)与主内容区 —
+// 侧边栏在 .app-content 之外,只写后者会让侧边栏内的控件失去可见焦点。
+.app-sidebar :focus-visible,
+.app-content :focus-visible {
+  outline: 2px solid var(--ih-accent);
+  outline-offset: 2px;
+}
+
+/* ── 页头:标题 + 副标题 + 右侧操作 ── */
+.ds-page-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+// 页头标题。下边距归零:原先的 0.25rem 是给「标题 + 副标题」组合让位的,
+// 但页头副标题已全项目移除(仅 404 留一条),其余 6 页因此各白留 4px 死间距。
+// 404 那处不受影响 —— 副标题 <p> 的浏览器默认外边距(1em = 14px)大于 4px,
+// 相邻外边距合并后这 0.25rem 本就被吃掉,真实间距由 <p> 自身撑着(2026-09-14 实测)。
+.ds-page-head h1 {
+  margin: 0;
+  font-size: 1.2rem;
+  font-weight: 400;
+  color: var(--ih-ink-strong);
+}
+
+// 页头副标题(全站仅 404 一处)与标题的间距。
+// ⚠ 这 0.875rem **不是**新设计,而是「改前 UA 给出的 1em」的移植:副标题是 .ds-meta
+// (0.875rem),UA 的 <p> 上下外边距 1em 折算正好 14px;而 h1 的 margin-bottom 为 0,
+// 相邻外边距合并后真实生效的间距就是这 14px。
+// base.scss 已在 reset 层把 <p> 的外边距归零 —— 若不在这里补回,标题与副标题会直接
+// 贴在一起,这是本轮唯一会让用户看出来的回归。
+// 若日后想收紧到最初的 0.25rem 设计意图(当年正是被外边距合并吃掉的),改这一行即可。
+.ds-page-head h1 + p {
+  margin-top: 0.875rem;
+}
+
+/* ── 分区标题:弹窗内分组小标题 ── */
+.ds-section-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 650;
+  color: var(--ih-ink-strong);
+}
+
+/* ── 元信息:小字次要文字 ── */
+.ds-meta {
+  font-size: 0.875rem;
+  color: var(--ih-ink-muted);
+}
+
+/* ── 页面各处的小胶囊(用户 2026-09-17)──
+   现有三处消费方,形状口径**完全一致**(改这里就是三处一起改):
+     · Sprint 概览页头的「状态」(挂在 PrimeVue <Tag> 上)与「日期区间」(+ is-muted);
+     · Sprint 时间轴每个点位下方的「状态」(同样挂在 <Tag> 上,见 Reports.vue)。
+   用户的原话是「像团队成员里的姓名一样」⇒ 尺寸与 .ds-metric-name 对齐:
+   全圆角、28px 高、左右内边距 0.5rem、0.75rem/600、不折行。
+   ⚠ 本类**只管形状,不管颜色**。状态那两颗状态是直接挂在 <Tag> 上的,
+     要保留 severity 配色(绿/黄/红/蓝);这里一旦写 background/color,会因层序(ds 晚于
+     primevue)把 Tag 的语义色整个盖掉。中性配色另开 is-muted 一档,给日期这类非状态信息。
+   ⚠ 别为了「统一」去改全局 .p-tag 的圆角:Tag 在 9 个文件里都有用(任务列表、故障详情、
+     现场截图…),那些地方维持原样,只有显式挂了 .ds-pill 的才变胶囊。
+   ⚠ 时间轴那处还有一条历史覆写要留意:`.ds-timeline … .p-tag { font-size }` 的特异性
+     (0,4,0)高于本类,补回去会把胶囊字号只在那处改掉 —— 详见该规则处注释。
+   ⚠ 时间轴那颗状态胶囊另有一条 2026-09-18 的覆写(.ds-timeline .ds-pill):高度改由内容
+     决定、字重 400,与本类 28px/600 的口径**故意不同** —— 改本类时别把那条差异当成漂移抹平。 */
+.ds-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  padding: 0 0.5rem;
+  border-radius: var(--ih-radius-pill);
+  font-size: 0.75rem;
+  font-weight: 600;
+  /* 区间文本是「2026-08-10 ~ 2026-09-04 · 激活 …」这种不能断开的串,宁可整颗换行 */
+  white-space: nowrap;
+}
+
+/* 非状态的小胶囊(日期区间):中性底 + 次要字色,不抢标题与状态胶囊的视线 */
+.ds-pill.is-muted {
+  background: var(--ih-line);
+  color: var(--ih-ink-muted);
+}
+
+/* ── 卡片 ── */
+.ds-card {
+  background: var(--ih-surface);
+  border: 1px solid var(--ih-line);
+  border-radius: var(--ih-radius-md);
+}
+
+/* ── 表格:无斑马纹、无网格线、发丝线行分隔 ── */
+/* 表头口径(2026-09-15 用户重新设计,全仓 11 张 .ds-table 共用这一条):
+   旧版是「12px + 65% 灰 + 全大写 + 0.06em 字距」,与表体(15px / --ih-ink)差 3px 且偏灰,
+   读起来像注释而非栏位名。现改为与表体几乎同号同色:
+     · 0.875rem(14px) / 650 / --ih-ink-strong —— 只比表体小 1px,靠字重和色深立层级。
+     · 撤销 uppercase + letter-spacing:列名基本是中文,uppercase 是空操作,
+       真正生效的只有 0.72px 字距,徒增松散与「工程风」观感。
+   ⚠ 承重项:表头与表体从此同色系,两者之间**唯一**的分隔就是这条底边 ——
+     故走 --ih-line-strong 的 2px,而不是原来的 1px --ih-line(12% 配 2px 会糊成软带)。
+     改这个值 ≈ 改表头的可辨识度,别单独动。
+   ⚠ 字号改动会连带改表头行高。唯一例外是「故障重开数」分布卡,它在下方
+     .ds-reopen-card 段把字号/字重/线宽钉回原值,以锁住卡高 304px。 */
+.ds-table .p-datatable-thead > tr > th {
+  font-size: 0.875rem;
+  font-weight: 650;
+  color: var(--ih-ink-strong);
+  background: transparent;
+  border-bottom: 2px solid var(--ih-line-strong);
+  padding: 0.625rem 0.75rem;
+}
+
+.ds-table .p-datatable-tbody > tr > td {
+  font-size: 0.9375rem;
+  font-weight: 400;
+  color: var(--ih-ink);
+  border-bottom: 1px solid var(--ih-line-soft);
+  padding: 0.75rem;
+}
+
+.ds-table .p-datatable-tbody > tr:hover > td {
+  background: var(--ih-paper);
+}
+
+/* 表体内的 PrimeVue <Tag> 默认继承 Aura 主题 tag.font.weight = 700(见 @primeuix/themes
+   aura/tag),于是「GitLab Group」这类字段值会比隔壁纯文本列更重 —— 与「表体内容不加粗」冲突。
+   ⚠ 只压字重、不动形状(border-radius 不碰):避免把表格里的状态标签一并改成胶囊,
+      那是 2026-09-17 BugInstanceDetailDialog 里刻意避免的全局副作用(见该处注释)。
+   ⚠ 不挂到全局 `.p-tag`:时间轴小标签、表格状态标签各有形态,全局改会牵一发而动全身;
+      本选择器限定在 `.ds-table .p-datatable-tbody` 内,只命中表体单元格里的标签。 */
+.ds-table .p-datatable-tbody .p-tag {
+  font-weight: 400;
+}
+
+.ds-table .p-datatable-tbody > tr:last-child > td {
+  border-bottom: none;
+}
+
+/* ── 合计行(表尾 tfoot;本仓唯一消费方是 BugDetailTable 的 `<ColumnGroup type="footer">`)──
+   先说它是什么:**组件自带的列分组 footer**,不是手写的行。问题在于本仓 .ds-table 的口径
+   当初只覆写了 thead / tbody,漏了 tfoot ⇒ 这一行一直吃 Aura 的 datatable.footer.cell.*
+   默认值,与全表四处对不上(2026-09-17 用户要求补齐):
+     · 左右内边距 1rem(表体 0.75rem)⇒ 合计数字比同列的数据数字右移 4px,列对不齐;
+     · 没有上边线,而表体末行的底边又被 `tr:last-child > td { border-bottom: none }` 去掉
+       ⇒ 合计行与最后一行数据之间**一点分隔都没有**,看着像多出来的一行数据;
+     · 字号继承根字号 16px(表体 15px)、字重 400 ⇒ 数字既比列里的大 1px、又看不出是汇总。
+   四档一次对齐:
+     内边距   = 表体(0.75rem)          → 列对齐;
+     上边线   = 表头下缘同款(2px --ih-line-strong)→ 表头与合计行成为这张表的一开一合;
+     字号     = 表体(0.9375rem)        → 与列里的数字同号,不会被误读成另一种量;
+     字重/颜色 = 表头(650 / --ih-ink-strong)→ 一眼看出是汇总行。
+   ⚠ 上边线取 2px --ih-line-strong,而不是表体内行分隔用的 1px --ih-line-soft:
+     与普通行同款就分不出「这行是汇总」;2px 强线是本仓「线要被看见」的那一档(同表头)。
+   ⚠ 底色保持透明:它落在弹窗卡面上,填底色反而会在矩阵里横切出一条色带。
+   ⚠ 挂 .ds-table 而不是 .ds-table--matrix:tfoot 是**通用角色**,口径该按角色写;
+     只是本仓目前只有 BugDetailTable 用到表尾,其余 8 张表都没有。 */
+.ds-table .p-datatable-tfoot > tr > td {
+  font-size: 0.9375rem;
+  font-weight: 650;
+  color: var(--ih-ink-strong);
+  background: transparent;
+  border-top: 2px solid var(--ih-line-strong);
+  padding: 0.75rem;
+}
+
+// 居中变体(替代 :deep(.col-center);默认左对齐,仅操作列等按需用)
+.ds-table--center .p-datatable-thead > tr > th,
+.ds-table--center .p-datatable-tbody > tr > td,
+.ds-table--center .p-datatable-tfoot > tr > td {
+  text-align: center;
+}
+
+// ⚠ 表头光有 text-align 是**折不中**的:标题不在 th 的直接文本流里,而是
+//   th > div.p-datatable-column-header-content{display:flex} > span.p-datatable-column-title,
+//   而该 flex 容器的 justify-content 默认是 flex-start ⇒ 那个 span 贴着左边、宽度就是它自己
+//   的文字宽,text-align 只能让"文字在自己盒里居中",盒本身不动(与 ds-nowrap 段踩的是同一处结构坑)。
+//   这一条是居中变体重心所在,缺了它表头看起来仍是左对齐。
+// ⚠ 只挂变体、不动 .ds-table 基础规则:默认仍是左对齐(整页明细表等长文本表要的就是左对齐)。
+.ds-table--center .p-datatable-thead > tr > th .p-datatable-column-header-content {
+  justify-content: center;
+}
+
+/* ── 窄列不折行(ds-nowrap)────────────────────────────────────────
+   起因:文档故障导入表(7 列)的表头被挤成**逐字竖排** —— 「优先级」「产生人」各 4 行、
+   「状态」3 行(2026-09-17 探针实测行盒数)。
+   ⚠ 这不是"弹窗不够宽"。把弹窗从 760px 加到 1200px 后**照样竖排**:DataTable 默认
+   `table-layout: auto`,而**中文的 min-content 只有一个字宽** —— 浏览器据此认为
+   「优先级」压到 1 字宽也行,于是把富余空间全给了长文本列(实测「名称」独占约一半),
+   短列反被榨干。加宽只是喂饱了长列,短列一点没多。
+   机制:nowrap 把该列的 min-content 从"一个字"抬到"文本固有宽度",auto 布局才不得不
+   给它留出位置(这一步才是真正的修法)。
+   ⚠ 只给**短列**挂:长文本列(「名称」「原因及分析」)必须能折行,全表 nowrap 会把表
+   撑出横向滚动条,反而更糟。
+   用法:在 <Column> 上写 class="ds-nowrap" —— PrimeVue 的 column class 会**同时**落到
+   th 与 td(HeaderCell/BodyCell 的 containerClass 都读 columnProp('class')),一个属性就够。
+   ⚠ 本文件在 @layer ds,层序在 primevue 之后,故能盖过 PrimeVue 自身的单元格样式。
+
+   ⚠⚠ 2026-09-17 发现**只写 th/td 那一层是无效的**(前一条同源修法漏掉了这一环):
+   PrimeVue 的表头文字不是 th 的直接文本节点,而是
+       th > div.p-datatable-column-header-content{display:flex} > span.p-datatable-column-title。
+   那个 span 是 **flex item** ⇒ 它会被**压到 min-content 以下**(flex 子项默认可收缩),
+   而 `white-space: nowrap` 只改「换行在哪断」、**不能阻止元素盒被压窄** ——
+   实测:th 与 span 的 computed `white-space` 都是 `nowrap`、`scrollWidth === clientWidth`
+   (没溢出),中文却在窄盒里**逐字**排成了 2 行。所以必须把 nowrap 一并按到内层这两个元素上。
+   实测对照(隔离页,同一份表、只差这一条规则):只挂 th → 「优先级」行盒 2、
+   th 实宽被压到 ≈60px;挂到内层 → 行盒 1、th 宽 66px。
+   ⚠ 第二层是**必需的**而非保险:光有 `.ds-table thead th.ds-nowrap` 时「优先级」就是 2 行。
+   ⚠ 只用后代选择器(不写 `>`)是刻意的 —— 将来的结构若再包一层也仍然生效。 */
+.ds-table .p-datatable-thead > tr > th.ds-nowrap,
+.ds-table .p-datatable-tbody > tr > td.ds-nowrap,
+.ds-table .p-datatable-thead > tr > th.ds-nowrap .p-datatable-column-header-content,
+.ds-table .p-datatable-thead > tr > th.ds-nowrap .p-datatable-column-title {
+  white-space: nowrap;
+}
+
+/* ── 分布明细矩阵表(BugDetailTable,BugDetailDialog;根节点带 .ds-table--matrix)────
+   用户 2026-09-17:增加纵向分隔线。这一节只做竖线,不做横线 ——
+   横向的发丝线本就由 .ds-table 的行底边负责,「加网格」是另一件事(且已被设计口径否掉:
+   全站表格去掉了 showGridlines)。
+
+   为什么用「相邻兄弟 +」而不是给每个单元格写 border-left:
+     这张表的**四行列数并不一致** —— 表头第一行是合并单元格(每个优先级 colspan = 标签数),
+     第二行与表体、表尾是逐列。只有「与左邻之间」这个口径能在四行上自动落成同一条竖线,
+     逐行按下标去标 border 迟早会错位一格。
+
+   两级线:
+     · 列与列之间      → --ih-line-soft(发丝,与行分隔同色系,不喧宾夺主);
+     · 组起始列 + 合计列 → --ih-line(压深一档),把「开发 │ 组 │ 组 │ 合计」这层结构显出来。
+   两级的判定都是模板打的 .ds-col-sep ——「每个优先级下的第一个标签列」与「末列合计」,
+   且表头两行、表体、合计行四处一致(见 BugDetailTable 的模板注释:少画一处就是断头线)。
+
+   ⚠ 组起始列的 1px 位置与发丝线**完全重合**(它本身就是某个 `+ th`),所以第二条规则只改颜色,
+     不改宽度 —— 否则会比别的竖线宽 1px,整条线看起来是歪的。
+   ⚠ 只挂 .ds-table--matrix:其余 8 处 .ds-table(明细弹窗、Jobs 日志、Dashboard 等)不加竖线。 */
+.ds-table--matrix .p-datatable-thead > tr > th + th,
+.ds-table--matrix .p-datatable-tbody > tr > td + td,
+.ds-table--matrix .p-datatable-tfoot > tr > td + td {
+  border-inline-start: 1px solid var(--ih-line-soft);
+}
+
+.ds-table--matrix .p-datatable-thead > tr > th.ds-col-sep,
+.ds-table--matrix .p-datatable-tbody > tr > td.ds-col-sep,
+.ds-table--matrix .p-datatable-tfoot > tr > td.ds-col-sep {
+  border-inline-start-color: var(--ih-line);
+}
+
+/* 表格本体**铺满容器宽度**(用户 2026-09-17,撤销同日早些时候的「不吃满 + 整表居中」)。
+   起因:本表所在的「故障分布统计」是放大态弹窗(内容区实测约 1360px),上方三张环图卡已铺满;
+   而 shrink-to-fit 的整表只有约 920px,居中后左右各空出约 220px —— 表格与卡片对不齐,
+   用户要求「分布明细表格铺满可用区域」。
+   ⚠ 直接回到主题默认的 width: 100%(原规则覆盖的正是它),同时删掉 `margin-inline: auto`
+     —— 满宽后已没有可居中的余量,留着只会让人以为表还可能变窄。
+   ⚠ 满宽 ≠ 各列等宽:auto 布局会把富余宽度按各列 max-content 的比例分掉,于是有的列被
+     撑肥、合计行被拉散(用户 2026-09-17:「通过加宽合计行的方式铺满很丑」)。
+     真正的等宽在**模板**里做 —— BugDetailTable.vue 给每个数值列绑定同一个计算宽度
+     numColWidth(列数是数据驱动的,SCSS 里没有这个分母),这里只负责把表拉到满宽。
+   ⚠ 不会顶出横向滚动:表装不下时由 .p-datatable-table-container 自带 overflow:auto 兜底。 */
+.ds-table--matrix .p-datatable-table {
+  width: 100%;
+}
+
+/* ── 「故障重开数」分布表(ReopenDistributionCard)────────────────────
+   这张卡顶替了原来同格里的趋势图卡,与邻卡(故障平均解决时长,画布 210px)同排。
+   默认 .ds-table 的行内边距是为整页明细表定的(表头 0.625rem / 行 0.75rem),
+   7 行会撑到 329px,把整行拉高 —— 邻卡被 grid 的 stretch 一并拉到 329,于是画布
+   下方多出 25px 空白(实测:304 的画布卡被拉到 329)。两卡的**底边就不再齐平**。
+   这里按「内容区 ≈ 邻卡画布 210px」反解内边距:
+     · 表头 0.25rem  → 表头行 26px
+     · 数据行 0.125rem → 行高 26px(4 + 行盒 21 + 1 发丝线)
+   内容区 = 表头 26 + 6×26 + 末行 25 = 207px,与画布 210px 同量级 ⇒ 卡高 304 = 同排四张全部 304。
+   ⚠ 末行比其余行少 1px:它没有底边线(见上方 `tr:last-child > td { border-bottom: none }`)。
+     这里早前写的是「26 + 7×26 = 208px」——把末行那条不存在的线也算了进去(多算 1px)。
+     2026-09-15 探针 61 实测:中段行 26px / 末行 25px,与上述推导一致。
+   ⚠ 行内边距只有 2px,是本仓最紧的一张表;它靠行间发丝线撑开视觉节奏,不靠留白。
+     若要放宽,改这一处即可,但每加 0.0625rem 全表就高 7px、第 2 行会重新被拉高
+     (0.25rem 时实测 329)。
+   只作用于本卡,其余 8 处 .ds-table(明细弹窗、Jobs 日志、Dashboard 等)行高不动。 */
+/* ⚠ 表头在此**钉回改动前的尺寸**(2026-09-15 用户要求「该卡只改颜色、不改字号」):
+   本卡是全仓最紧的表,表头行 26px 是「内容区 207 ≈ 邻卡画布 210」的前提。
+   全站表头已升到 14px/650/2px 底边,这里字号 12px、字重 600、底边 1px 全部保持原值,
+   只让文字颜色跟随新口径(--ih-ink-strong)⇒ 表头行高不变、卡高仍 304px、与同排四张齐平。
+   若哪天要放开本卡表头,先重新量卡高 —— 14px 字号 + 2px 底边会同时抬高表头行。 */
+.ds-card.ds-reopen-card .ds-table .p-datatable-thead > tr > th {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--ih-ink-strong);
+  border-bottom: 1px solid var(--ih-line);
+  padding: 0.25rem 0.5rem;
+}
+
+.ds-card.ds-reopen-card .ds-table .p-datatable-tbody > tr > td {
+  padding: 0.125rem 0.5rem;
+}
+
+// 有重开故障的行才可点(点开该 Sprint 的重开明细);无数据的行保持默认光标。
+// 类由组件侧 :row-class 按 total > 0 给出,判定与点击处理器同源。
+.ds-card.ds-reopen-card .ds-table .p-datatable-tbody > tr.is-clickable {
+  cursor: pointer;
+}
+
+// 故障列表里「可点开的行」——点开的是统一的「故障详情」弹窗:
+// RDM 故障看 字段 + 变更记录,文档故障看 字段 + 现场截图。
+// 类由各组件的 :row-class 给出,判定与点击处理器同源(都以「这一行有没有 issue_key」为准),
+// 不会出现「看着可点但点了没反应」。目前三处列表共用同一个类:
+//   BugListDialog(两类故障混排)、AvgTimeDevelopersDialog、ReportReopenDialog。
+.ds-table .p-datatable-tbody > tr.is-clickable {
+  cursor: pointer;
+}
+
+.ds-table .p-datatable-tbody > tr.is-clickable:hover > td {
+  background: var(--ih-hover);
+}
+
+/* ── 单元格内可点击数值(如点击数字打开明细弹窗)──
+   必须是 button 才能被键盘触发;但要去掉浏览器默认外观并继承单元格字体,
+   否则字号/字体与表格其余内容不一致。color 用 inherit,保持原有观感,
+   仅在 hover 时加下划线提示可点。 */
+.ds-cell-button {
+  margin: 0;
+  padding: 0;
+  background: none;
+  border: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  border-radius: var(--ih-radius-sm);
+}
+
+.ds-cell-button:hover {
+  text-decoration: underline;
+}
+
+/* ── 顶栏 ── */
+.ds-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+/* ── 统计卡(含 4 种 tone + 零值中性态)── */
+.ds-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 1.5rem 1rem;
+  border: none;
+  border-radius: var(--ih-radius-md);
+  /* 必须用 --ih-on-accent 而非 --ih-surface:后者是卡面底色,暗色下会变成深色,
+     直接拿来当"白字"会让渐变卡上的数字不可读 */
+  color: var(--ih-on-accent);
+  box-shadow: var(--ih-shadow-card);
+}
+
+.ds-stat.tone-total {
+  background: var(--ih-grad-total);
+}
+
+.ds-stat.tone-pending {
+  background: var(--ih-grad-pending);
+}
+
+.ds-stat.tone-success {
+  background: var(--ih-grad-success);
+}
+
+.ds-stat.tone-failed {
+  background: var(--ih-grad-failed);
+}
+
+/* 零值时降级为中性卡:值本就是 0,不该继续用彩色喊话 ——
+   否则「失败 0」的红色卡片会一直报警,真出现失败时反而失去区分度。 */
+.ds-stat.tone-zero {
+  background: var(--ih-surface);
+  border: 1px solid var(--ih-line);
+  color: var(--ih-ink);
+  box-shadow: none;
+}
+
+.ds-stat-value {
+  font-size: 2.25rem;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--ih-on-accent);
+}
+
+.ds-stat-label {
+  font-size: 0.875rem;
+  color: var(--ih-on-accent);
+  opacity: 0.8;
+}
+
+.ds-stat.tone-zero .ds-stat-value,
+.ds-stat.tone-zero .ds-stat-label {
+  color: var(--ih-ink-muted);
+}
+
+/* ── 迭代概览卡:点击 Sprint 时间轴点位后的弹窗(Reports.vue)──
+   十余项指标同屏并列,若都做成同一种「大数字」卡,视觉上会互相淹没 ——
+   既看不出哪些是规模量、哪些是比率,也分不清哪张卡还没有数据。
+   故按指标的**形态**分配视觉载体,由 `is-*` 修饰类选择:
+     .is-hero     核心产出(\_\_唯一\_\_的强调项,渐变底 + 反白字)
+     (无)         普通计数/时长(标签 + 大数字 + 单位)
+     .is-bar      比率型(数字 + 底部进度条)
+     .is-ring     完成率型(进度环 + 环心百分比)
+     .is-split    构成型(水平堆叠条,展示两段占比)
+     .is-ratio    派生比值型(数字 + 分母胶囊)
+     .is-range    区间型(起止日期 + 虚线连接)
+     .is-team     人员型(姓名首字圆块 + 溢出计数)
+     .is-reserved 无数据源(虚线边框 + 徽标说明)
+   另有一个**与形态正交**的行为类(不改变观感,只声明可交互):
+     .is-clickable 整卡可下钻(渲染成 button),悬停/聚焦给出提示
+   配色一律取自 --ih-* 语义 token(含 color-mix 派生),暗色下自动翻转。
+   ⚠ 布局(网格列数/间距)仍交给模板里的 Tailwind 工具类,本区块只管卡内观感。 */
+.ds-metric {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 0.5rem;
+  min-height: 6.25rem;
+  /* 上下 padding 0.875rem → 0.75rem:让出的 4px 专项补贴 .ds-metric-value 的字号,
+     换算关系见 .ds-metric-value 处的「字号补偿账本」。⚠ gap 0.5rem 不能动:
+     3 子卡与 4 子卡要同时保持行高不变,唯一解就是 gap 不变。 */
+  padding: 0.75rem 1rem;
+  background: var(--ih-surface);
+  border: 1px solid var(--ih-line);
+  border-radius: var(--ih-radius-md);
+  /* 卡内一律**居中**(用户 2026-09-17:此前只有 label/value/sub 居中,胶囊与徽标仍靠左)。
+     ⚠ 连带约定:靠宽度表达的元素(进度条 / 两段堆叠条 / 工时双栏)在居中下会按 fit-content
+     收缩 —— 空盒直接变 0 宽,所以它们各自用下面这条 `align-self: stretch` 铺满,别指望本行。 */
+  align-items: center;
+}
+
+/* 必须横向铺满整卡的元素:进度条、两段堆叠条、工时双栏。
+   ⚠ 卡内 align-items:center ⇒ 这三者不显式 stretch 就按 fit-content 收缩:
+     .ds-metric-bar / .ds-metric-split 是空盒 ⇒ 宽 0 ⇒ **整条看不见**;
+     .ds-metric-dual 会缩到内容宽 ⇒ 中间那根 1px 分隔线跑不到卡片正中。
+   ⚠ 别改成给父级 restore stretch —— 那会把 label/value/sub 一起顶回左边。 */
+.ds-metric-bar,
+.ds-metric-split,
+.ds-metric-dual {
+  align-self: stretch;
+}
+
+// 标签行:.ds-metric-label 与左侧色条(见 .is-plain 的 ::before 用法)同排
+.ds-metric-label {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  /* 12px → 14px,并去掉 0.04em 字距:与表头新口径同族(2026-09-15 用户拍板)。
+     ⚠ 行盒**钉死在 15px** —— 它是旧口径(0.75rem × 1.25)的实测盒高,也是
+     .ds-metric-value 的「字号补偿账本」赖以成立的前提(见该处注释)。
+     0.9375rem 让放大后的行盒仍是 15px,故 .ds-metric 高度逐项不变。
+     别改成 `font-size: 0.875rem; line-height: 1.25`:盒高会变 17.5px,
+     整排卡各长 2.5px(探针 61 实测)。 */
+  font-size: 0.875rem;
+  line-height: 0.9375rem;
+  font-weight: 650;
+  color: var(--ih-ink-strong);
+}
+
+// 标签后的「解释」问号图标:默认弱化为静默态(仅一条发丝边 + 次要墨),悬停/聚焦时
+// 点亮为点缀蓝并触发 Tooltip。自身固定 16px 圆形、flex:none,不参与 .ds-metric-label
+// 的字号补偿账本,故 .ds-metric 行高不变(探针实测 15px 标签行盒不变)。
+// 图标是 span(不是 button),即便是可下钻卡里的子元素也不破坏「button 内不可套 button」
+// 的 HTML 约束;@click.stop 阻止点它时顺带触发卡片下钻。
+.ds-metric-help {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 1rem;
+  height: 1rem;
+  margin-left: 0.125rem;
+  border-radius: 50%;
+  border: 1px solid var(--ih-line);
+  color: var(--ih-ink-muted);
+  font-size: 0.625rem;
+  line-height: 1;
+  cursor: help;
+  transition: color 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
+  &:hover,
+  &:focus-visible {
+    color: var(--ih-accent);
+    border-color: var(--ih-accent);
+    background-color: color-mix(in srgb, var(--ih-accent) 12%, transparent);
+    outline: none;
+  }
+  .pi {
+    font-size: 0.625rem;
+  }
+}
+
+.ds-metric-value {
+  /* tabular-nums:同一弹窗里各卡数字宽度一致,扫视时数位能对齐 */
+  font-variant-numeric: tabular-nums;
+  /* ── 字号补偿账本(行高恒定的约束推导,2026-09 实测)──
+     卡外高 = 2px 边框 + 2×padding + (n−1)×gap + Σ子盒。数值行 V 是唯一可放大的子盒,
+     预算只能来自内部留白:padding 14→12(2×=+4)+ label 行高 17→15(+2)= ΔV=+6,
+     且 3 子卡与 4 子卡联立要求 gap 不变;环卡(无数值行)由 .is-ring 的 gap +6 找平。
+     于是 V = 28×1.1=30.8 → 36.8px:font-size 2.3rem × line-height 1。
+     行高压到 1 不裁字:数字无降部,单位(14px)的行内盒在 36.8px 行盒内。 */
+  font-size: 2.3rem;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--ih-ink-strong);
+}
+
+// 单位与数字同行但弱化,避免「14 天」被读成两个数值。
+// 13px→14px:单位随数值一起放大;其行内盒(~20px)仍完全落在数值行盒(36.8px)内,
+// 不影响行高(改前 13px 时同样落在 30.8px 行盒内,均不撑行)。
+.ds-metric-unit {
+  margin-left: 0.25rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--ih-ink-muted);
+}
+
+.ds-metric-sub {
+  font-size: 0.75rem;
+  color: var(--ih-ink-muted);
+}
+
+/* tone:只改数值与进度填充的颜色,不动底色 ——
+   底色留给 is-* 结构修饰类,两者正交,可自由组合。 */
+.ds-metric.tone-info .ds-metric-value {
+  color: var(--ih-status-info);
+}
+
+.ds-metric.tone-success .ds-metric-value {
+  color: var(--ih-status-success);
+}
+
+.ds-metric.tone-warn .ds-metric-value {
+  color: var(--ih-status-warn);
+}
+
+.ds-metric.tone-danger .ds-metric-value {
+  color: var(--ih-status-danger);
+}
+
+/* ── is-hero:全弹窗唯一的强调卡 ── */
+.ds-metric.is-hero {
+  background: var(--ih-grad-total);
+  border-color: transparent;
+  box-shadow: var(--ih-shadow-card);
+}
+
+/* 渐变底上的文字必须显式反白:--ih-on-accent 而不是 --ih-surface
+   (后者在暗色下是深色卡面,拿来当白字会读不出来) */
+.ds-metric.is-hero .ds-metric-label,
+.ds-metric.is-hero .ds-metric-value,
+.ds-metric.is-hero .ds-metric-unit,
+.ds-metric.is-hero .ds-metric-sub {
+  color: var(--ih-on-accent);
+}
+
+.ds-metric.is-hero .ds-metric-label,
+.ds-metric.is-hero .ds-metric-sub {
+  opacity: 0.82;
+}
+
+/* ── 左侧色条:给「普通计数」卡一个轻量层级提示(信息类指标用 info 色)── */
+.ds-metric.is-plain {
+  position: relative;
+  overflow: hidden;
+}
+
+.ds-metric.is-plain::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: var(--ih-accent);
+}
+
+/* ── 进度条(.is-bar,也用于 .is-ring 卡的辅助说明)── */
+.ds-metric-bar {
+  height: 6px;
+  border-radius: var(--ih-radius-pill);
+  background: var(--ih-line);
+  overflow: hidden;
+}
+
+.ds-metric-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--ih-accent);
+  // 数值变化时(切换 Sprint)条长有个短过渡,读得出「变了多少」
+  transition: width 0.35s ease;
+}
+
+.ds-metric.tone-success .ds-metric-bar > span {
+  background: var(--ih-status-success);
+}
+
+.ds-metric.tone-warn .ds-metric-bar > span {
+  background: var(--ih-status-warn);
+}
+
+.ds-metric.tone-danger .ds-metric-bar > span {
+  background: var(--ih-status-danger);
+}
+
+/* ── is-ring:完成率进度环。conic-gradient 只能整面着色,
+   故用一层卡面底色的内圆「挖空」中心 —— 内圆必须取 --ih-surface(卡面),
+   不能用 --ih-on-accent(那是反白色,挖出来的中心会是白块)。 */
+.ds-metric-ring {
+  --ring: var(--ih-accent);
+  display: grid;
+  place-items: center;
+  width: 76px;
+  height: 76px;
+  border-radius: 50%;
+  background: conic-gradient(
+    var(--ring) 0 var(--pct, 0%),
+    var(--ih-line) var(--pct, 0%) 100%
+  );
+}
+
+.ds-metric-ring > span {
+  display: grid;
+  place-items: center;
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  background: var(--ih-surface);
+  font-variant-numeric: tabular-nums;
+  /* 16px→18px:环径(76/58)不变,只在固定内圆里放大文字。
+     最宽样本「100%」@18px bold ≈ 48px < 58px,不会溢出内圆。 */
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: var(--ih-ink-strong);
+}
+
+.ds-metric.tone-success .ds-metric-ring {
+  --ring: var(--ih-status-success);
+}
+
+.ds-metric.tone-warn .ds-metric-ring {
+  --ring: var(--ih-status-warn);
+}
+
+.ds-metric.tone-danger .ds-metric-ring {
+  --ring: var(--ih-status-danger);
+}
+
+/* 环卡。
+   ⚠ 原注「环卡内容居中,与其他卡的左对齐形成对比」已作废(2026-09-17):卡内居中现在是
+     **全卡统一**口径(见 .ds-metric),这两条只再保证「环心那圈百分比文字自身居中」。
+   gap 0.5rem→0.875rem:环卡没有 .ds-metric-value,padding(-4px)与 label 行高(-2px)
+   的收紧无法被数值行「吃回去」,行高会凭空矮 6px;把 6px 计入自身 gap 找平,
+   「故事完成率」所在行的行高与其他行一样保持不变(见 .ds-metric-value 的补偿账本)。 */
+.ds-metric.is-ring {
+  gap: 0.875rem;
+  align-items: center;
+  text-align: center;
+}
+
+/* ── is-split:两段式水平堆叠条(如 开发/测试 时长构成)── */
+.ds-metric-split {
+  display: flex;
+  height: 10px;
+  border-radius: var(--ih-radius-pill);
+  background: var(--ih-line);
+  overflow: hidden;
+}
+
+.ds-metric-split > i {
+  display: block;
+  height: 100%;
+  transition: width 0.35s ease;
+}
+
+.ds-metric-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.875rem;
+  font-size: 0.75rem;
+  color: var(--ih-ink-muted);
+}
+
+.ds-metric-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3125rem;
+}
+
+.ds-metric-legend i {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: 2px;
+}
+
+/* ── 工时双栏:计划 / 投入 左右分隔(合并原「计划工时」「投入工时」两张卡)──
+   卡顶一个统一标签「工时」,下方左右两半各带自己的小标签(计划/投入);
+   中间 1px 分隔线由 .ds-metric-divider 提供,不挤占字号预算。
+   数值仍用 .ds-metric-value(2.3rem),保证行高与其他卡恒定一致(见字号补偿账本)。 */
+.ds-metric-dual {
+  display: flex;
+  align-items: stretch;
+}
+
+.ds-metric-half {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.ds-metric-half-label {
+  /* 与 .ds-metric-label 同口径:14px / 650 / 强墨 / 无字距。
+     ⚠ 本类此前**没有显式行高**,盒高由继承的 normal 决定 = 17px(探针 61 实测)。
+     放大到 14px 后若仍不管行高,盒高会涨到约 20px —— 涨幅只落在「工时」这一张
+     双栏卡上,同排被 grid 拉伸后整行跟着变高。故把 17px 显式写死(= 1.0625rem),
+     与主标签钉 15px 同理:是补偿盒高,不是排版偏好。 */
+  font-size: 0.875rem;
+  line-height: 1.0625rem;
+  font-weight: 650;
+  color: var(--ih-ink-strong);
+}
+
+/* 竖直分隔线:上下各收 2px,不顶到卡内边距,视觉更轻 */
+.ds-metric-divider {
+  flex-shrink: 0;
+  width: 1px;
+  margin: 0.125rem 0.75rem;
+  background: var(--ih-line);
+}
+
+/* ── is-ratio:分母做成胶囊,避免「1.29」被误读成绝对值 ──
+   2026-09-17 去掉 `align-self: flex-start`:卡内一律居中(见 .ds-metric),
+   胶囊不再单独贴左 —— 它就是用户点名的那个「没居中的」。 */
+.ds-metric-chip {
+  padding: 0.0625rem 0.4375rem;
+  border: 1px solid var(--ih-line);
+  border-radius: var(--ih-radius-pill);
+  font-size: 0.6875rem;
+  color: var(--ih-ink-muted);
+}
+
+/* ── is-range:起止日期 + 虚线连接 ── */
+.ds-metric-range {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--ih-ink);
+}
+
+.ds-metric-range-line {
+  flex: 1;
+  min-width: 0.75rem;
+  height: 2px;
+  /* 虚线用重复渐变画:比 border-top: dashed 更容易控制 2px 粗细与段长 */
+  background-image: linear-gradient(90deg, var(--ih-line) 0 60%, transparent 60% 100%);
+  background-size: 8px 2px;
+  background-repeat: repeat-x;
+}
+
+/* ── is-team:成员姓名胶囊(最多 3 个,其余折叠成「+N」)──
+   2026-09-17 前这里是「姓名首字圆块」:28px 定宽圆、只印一个「姓」。用户要求改成
+   「显示姓名,不要只是姓的图标,最多展示三个」⇒ 宽度改为随姓名自适应(胶囊),
+   类名也从 .ds-metric-avatar 改为 .ds-metric-name —— 圆块没了,再叫 avatar 是误导。
+   ⚠ flex-shrink:0 仍然要:姓名是变长内容,不挡一下会被 flex 压到 min-content 以下,
+     在窄卡里逐字挤成竖排(与 ds-nowrap 踩的是同一处结构坑,那里有实测记录)。
+   ⚠ 高度保持 28px 与改前的圆块一致:卡片高度不变,同排四张仍齐平。
+   ⚠ 上限 3 与「换行」的关系:容器是 flex-wrap,3 个姓名 + 「+N」在最窄的一档
+     (lg 四列)也是一行;再多就会折行把卡片顶高。调上限要连着这条一起看。
+   ⚠ 它与 .ds-pill(Sprint 概览页头 + Sprint 时间轴的状态 / 日期胶囊)是**同一套形状口径**:
+     28px 高 / 左右 0.5rem / 0.75rem 600 / 全圆。两处各写了一次(那段叫「页面各处的小胶囊」),
+     用户口径就是「那些胶囊要像姓名胶囊」。改尺寸时两边必须同步。 */
+.ds-metric-names {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.ds-metric-name {
+  display: grid;
+  place-items: center;
+  height: 28px;
+  padding: 0 0.5rem;
+  flex-shrink: 0;
+  border-radius: var(--ih-radius-pill);
+  background: color-mix(in srgb, var(--ih-accent) 16%, transparent);
+  color: var(--ih-accent);
+  font-size: 0.75rem;
+  font-weight: 600;
+  /* 姓名不拆行:宁可整块换到下一行,也不要「张\n三」 */
+  white-space: nowrap;
+}
+
+.ds-metric-name.is-more {
+  background: var(--ih-line);
+  color: var(--ih-ink-muted);
+}
+
+/* ── is-reserved:无数据源。虚线边框 + 褪色数值,一眼与有数据的卡区分开 ── */
+.ds-metric.is-reserved {
+  background: transparent;
+  border-style: dashed;
+}
+
+.ds-metric.is-reserved .ds-metric-value {
+  color: var(--ih-ink-faint);
+}
+
+/* 徽标(待同步 / 无样本 / 无故障…)同样不再 align-self: flex-start(2026-09-17):
+   它和胶囊是卡内仅剩的两个显式靠左项,一并交给 .ds-metric 的居中对齐。 */
+.ds-metric-badge {
+  padding: 0.0625rem 0.4375rem;
+  border-radius: var(--ih-radius-pill);
+  background: var(--ih-line);
+  font-size: 0.6875rem;
+  color: var(--ih-ink-muted);
+}
+
+/* ── is-clickable:整卡可下钻。概览弹窗里现有 5 张:团队成员(→ 成员明细)、
+   故障数(→ 故障分布统计)、故障平均解决时长(→ 时长明细)、计划外故事占比(→ 故事列表)、
+   工时(→ 工时不一致明细;**只有投入 > 计划时**才是可点的,其余情况该卡退回 div)。──
+   卡片渲染成 <button> 以保证 Tab/Enter 原生可用,故必须清零 UA 外观。
+   最要紧的一条是 text-align —— 按钮默认居中,而 .ds-metric 的子元素都是 flex item,
+   不清零会把数值与副标题顶到格心;font 也必须 inherit,否则按钮退回系统 UI 字体,
+   数字与相邻卡片不一致(padding/border/background/radius 已由 .ds-metric 给出,
+   作者样式本就压过 UA,无需重复声明)。
+   ⚠ 不要在这里补 width:100% —— 项目没有全局 box-sizing:border-box,
+     卡片在网格里靠 justify-self:stretch 撑满整格,再显式给 width 会让边框盒
+     = 格宽 + 左右 padding,直接溢出到相邻列。 */
+button.ds-metric {
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  appearance: none;
+  cursor: pointer;
+}
+
+.ds-metric.is-clickable {
+  position: relative;
+  transition: background-color 0.15s, border-color 0.15s;
+}
+
+/* 可点击卡片右上角的小绿点:作为「此卡可下钻」的视觉 affordance。
+   挂在 .is-clickable 上,因此仅在有数据、卡片真实可点时出现;
+   无样本时卡片退回 div(无 is-clickable),点自然消失。配色走
+   --ih-status-success(亮 #16a34a / 暗 #4ade80),随主题翻转。 */
+.ds-metric.is-clickable::after {
+  content: '';
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ih-status-success);
+  /* 用卡面底色描一圈,让点浮起、不被卡底色吞掉 */
+  box-shadow: 0 0 0 2px var(--ih-surface);
+}
+
+/* 给标签行右侧让位,避免较长的标签文字(如「故障平均解决时长」)压到右上角小绿点 */
+.ds-metric.is-clickable .ds-metric-label {
+  padding-right: 1rem;
+}
+
+/* 悬停底用 color-mix 合成出**不透明**的浅色(而非直接铺半透明的 --ih-hover),
+   这样卡面不会透出弹窗底色;色相取 accent,与 .is-plain 的左侧色条同源。 */
+.ds-metric.is-clickable:hover {
+  background: color-mix(in srgb, var(--ih-accent) 5%, var(--ih-surface));
+  border-color: var(--ih-accent);
+}
+
+.ds-metric.is-clickable:focus-visible {
+  outline: 2px solid var(--ih-accent);
+  outline-offset: 2px;
+}
+
+/* ── 弹窗尺寸四档 ── */
+.ds-dialog-sm {
+  width: var(--ih-dialog-sm);
+}
+
+.ds-dialog-md {
+  width: var(--ih-dialog-md);
+}
+
+.ds-dialog-lg {
+  width: var(--ih-dialog-lg);
+}
+
+.ds-dialog-xl {
+  width: var(--ih-dialog-xl);
+}
+
+.ds-dialog-sm,
+.ds-dialog-md,
+.ds-dialog-lg,
+.ds-dialog-xl {
+  max-width: 95vw;
+}
+
+/* ── 空态 ── */
+.ds-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 2.5rem 1rem;
+  text-align: center;
+  color: var(--ih-ink-muted);
+}
+
+/* ── 状态点(8px 圆点 + tone 变体)── */
+.ds-tag-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--ih-ink-muted);
+}
+
+.ds-tag-dot.tone-info {
+  background: var(--ih-status-info);
+}
+
+.ds-tag-dot.tone-success {
+  background: var(--ih-status-success);
+}
+
+.ds-tag-dot.tone-warn {
+  background: var(--ih-status-warn);
+}
+
+.ds-tag-dot.tone-danger {
+  background: var(--ih-status-danger);
+}
+
+.ds-tag-dot.tone-contrast {
+  background: var(--ih-accent);
+}
+
+} // @layer ds

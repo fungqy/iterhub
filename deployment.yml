@@ -1,0 +1,142 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: iterhub-nginx-config
+data:
+  default.conf: |
+    server {
+        listen 80;
+        server_name localhost;
+        root /usr/share/nginx/html;
+        index index.html;
+
+        # /iterhub 无尾斜杠 → 301 到 /iterhub/
+        location = /iterhub {
+            return 301 /iterhub/;
+        }
+
+        # 静态资源 + SPA 回退:去掉 /iterhub 前缀交给 root 查找,
+        # 避免 alias 与 try_files 组合的内部重定向循环(此前 assets 报 500)
+        location /iterhub/ {
+            rewrite ^/iterhub/(.*)$ /$1 break;
+            try_files $uri $uri/ /index.html;
+        }
+
+        # 文档故障导入的唯一数据源是 297MB 的「应用平台现场问题沟通新.xlsx」
+        # (390 张内嵌现场截图),上限必须与该文件同步抬高,且两处都要:
+        # 外层给静态资源,api location 给上传(nginx 的 add_header 不继承,
+        # client_max_body_size 同理 —— 漏掉里层那个,上传会在代理层被 413 挡掉)。
+        client_max_body_size 400m;
+
+        location /iterhub/api {
+            proxy_pass http://localhost:8000/api;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection 'upgrade';
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_cache_bypass $http_upgrade;
+            client_max_body_size 400m;
+        }
+
+        gzip on;
+        gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript;
+        gzip_min_length 1000;
+    }
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: iterhub
+  labels:
+    app: iterhub
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: iterhub
+  template:
+    metadata:
+      labels:
+        app: iterhub
+    spec:
+      containers:
+      - name: iterhub-frontend
+        image: harbor.zvos.zoomlion.com/embodied/iterhub-web:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 80
+        volumeMounts:
+        - name: nginx-config
+          mountPath: /etc/nginx/conf.d/default.conf
+          subPath: default.conf
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+      - name: iterhub-service
+        image: harbor.zvos.zoomlion.com/embodied/iterhub-service:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8000
+        env:
+        - name: MSQL_DSN
+          value: "mysql+pymysql://iteruser:iterpass123@10.102.201.187:3306/iterdb"
+        - name: HOST
+          value: "0.0.0.0"
+        - name: PORT
+          value: "8000"
+        # ⚠ 必须与 nginx 的 client_max_body_size 同步(上文本 ConfigMap 里的 400m),
+        #    也和 backend 的默认上限 400MiB 一致。这里原本是 209715200(200MiB),
+        #    而唯一的数据源「应用平台现场问题沟通新.xlsx」实测 283.6MiB —— 于是上传会
+        #    在 nginx 放行之后被后端 413 挡回,现象和"文件损坏"一模一样。
+        - name: MAX_UPLOAD_BYTES
+          value: "419430400"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 5
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        resources:
+          requests:
+            cpu: "200m"
+            memory: "256Mi"
+          limits:
+            cpu: "1000m"
+            memory: "1Gi"
+      volumes:
+      - name: nginx-config
+        configMap:
+          name: iterhub-nginx-config
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: iterhub-service
+spec:
+  selector:
+    app: iterhub
+  ports:
+  - name: frontend
+    port: 80
+    targetPort: 80
+    nodePort: 30801
+  type: NodePort

@@ -1,0 +1,318 @@
+// 应用壳 + 文档基线(第 0 层):只放结构,不放视觉。
+// P2 修正:html 字号基准由 18px 改回 16px(PrimeVue Aura 按 16px 设计,
+// 18px 会让全站组件同步膨胀 12.5%)。全站 rem 随之缩小 11%,属有意变更。
+
+html {
+  // 全局字号基准:PrimeVue 主题与站内 rem 样式均跟随此缩放
+  font-size: 16px;
+}
+
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+}
+
+#app {
+  height: 100%;
+  overflow: hidden;
+}
+
+// ── 最小 UA 重置:只补「实测确有影响」的 UA 默认值 ──
+//
+// 前提:本项目**有意不引 Tailwind preflight**(preflight 会重置 button/input/table 的
+// 默认样式,与 PrimeVue 冲突,见 tailwind.css 顶部说明)。代价是浏览器 UA 默认样式表
+// 全部落地。2026-09-14 用 CDP 驱动无头 Edge,对 8 个页面 / 1038 个元素做了逐元素全量扫描
+// (脚本 .workbuddy/verify-ui/cdp-drive19.mjs,报告 report19-*.json),把「真的落到元素上」
+// 的 UA 默认值收敛成下面 3 条。每条都有实测依据,**不做无差别 reset**:
+//
+//   1. body 的 8px 外边距。壳高写死 100vh,于是整个壳从 y=8 开始、底部超出视口 8px,
+//      侧边栏底部那两个按钮的下沿**永远被切掉**。绕不过去:body{height:100%} 解析的是
+//      html 的视口高,不会减去 body 自身的 margin —— 唯一修法就是清零。
+//   2. <p> 的 1em 上下外边距。它随 <p> 自身字号缩放(.ds-meta 是 0.875rem → 14px,
+//      正文 1rem → 16px),在 flex-column + gap 容器里会与 gap **叠加**,
+//      于是空状态、卡片提示、弹窗里各多出 14~16px 说不清的留白。归零后垂直节奏由
+//      容器的 gap 独占。⚠ 有两处旧靠它供距,已显式补回(否则会当场贴在一起):
+//        · 404 页头「标题 + 副标题」→ components.scss 的 `.ds-page-head h1 + p`
+//        · 报表页「Sprint 时间轴」标签 → Reports.vue 上的 mb-3.5
+//   3. 表单控件不继承文档字体。UA 给 button/input/select/textarea 的是 Arial,
+//      于是 PrimeVue 里那些**裸 <button>**(分页器首/末/上/下页钮、日期选择器触发钮)
+//      单独用 Arial 渲染,字形与全站不一致。.app-user-trigger 早已手工写了
+//      `font-family: inherit` 绕开它,这里只是把同一条经验推广到所有控件。
+//      只补 font-family,不补 font-size/font-weight —— 后两项 PrimeVue 是按 16px
+//      设计好的,一起写会把按钮字号顶掉。
+//
+// 扫描里「看着像泄漏、实际不是」的,一并记下免得后人再查一遍:
+//   · table 的 border-collapse: separate —— 由 `.p-datatable-table` **自己**声明,
+//     并非 UA 默认值,且配 border-spacing: 0,不存在双线问题。
+//   · ul/ol 的 40px padding-inline-start —— PrimeVue 菜单自带重置;应用里唯一的 <ul>
+//     (DocBugImport 的导入错误列表)显式写了 pl-5 list-disc,本就在作者控制之下。
+//   · h1~h6 的字号/字重 —— 全站标题都走 .ds-* 类,UA 值落不到元素上。
+// 未覆盖区域:默认关闭的弹层(对话框)不在初始 DOM 里,静态扫描够不到,本轮只覆盖了
+// 弹层之外的 DOM。日后新增页面若用到本次未重置的 UA 默认值(如 blockquote/dl),
+// 重跑一次 cdp-drive19.mjs 即可复现该结论。
+//
+// 为什么裹进 `@layer reset` 而不是像本文件其余部分那样裸写:无 @layer 的样式优先级
+// **高于所有层**(含 primevue/ds/utilities),裸写会让「重置」反而压住工具类 —— 那正是
+// 本文件历史上最怕的那类静默失效。放进最低层后,重置只在没人管的地方兜底。
+@layer reset {
+  body {
+    margin: 0;
+  }
+
+  p {
+    margin: 0;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font-family: inherit;
+  }
+}
+
+// ── 应用壳布局:仅结构;颜色一律取 tokens.scss 的产品语义变量(--ih-*)──
+//
+// ⚠ 历史坑(2026-09-14 修复):本文件曾用 PrimeVue 的**原始调色板** --p-surface-* /
+//   --p-primary-*。那是未做亮暗映射的色阶:Aura 的暗色方案只把 surface 由 slate 换成
+//   zinc(**亮度不变**),primary 更是完全不动 —— 实测 --p-surface-0 在亮/暗两态都是
+//   #ffffff。于是侧边栏在暗色下依旧纯白,而隔壁 .app-content(用 --ih-paper)已是深色。
+//   规则:**原始调色板不得用于背景/文字/边框**。要跟随主题,只能用 --ih-*,
+//   或用 PrimeVue 的**语义** token(--p-content-background / --p-highlight-* 等)。
+.app-shell {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+  border: none; /* 取消外边框 */
+  outline: none;      /* 清除轮廓线（常见于 focus 状态） */
+  box-shadow: none;   /* 清除可能伪装成边框的阴影 */
+  margin: 0;      /* 排除是外边距留白造成的“边框”假象 */
+  padding: 0;     /* 排除内边距背景色造成的“边框”假象 */
+}
+
+.app-sidebar {
+  // 宽度由「内容 + 内边距」定,不是拍脑袋:约束项是品牌名(6 字 = 96px),
+  // 比任何导航项(最长 4 字 = 64px)都宽。见 .app-brand 的几何注释。
+  width: 165px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  // 面:#fff → #1e2128。与 .ds-card 同源(--ih-surface),暗色下与卡片一致。
+  background: var(--ih-surface);
+  border-right: 1px solid var(--ih-line);
+  transition: width 0.2s ease;
+
+  &.collapsed {
+    width: 64px;
+  }
+}
+
+// 品牌行:标记 + 名称。标记与 favicon 同源(见 MainLayout.vue)。
+// 标记尺寸取 24px:比导航的 16px 线性图标更重,是「品牌」而非「菜单项」的视觉地位。
+// 不做左右对称内边距,而是让**标记中心**对齐导航图标的**中心**(见下)。
+.app-brand {
+  height: 60px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  // 左 20px:标记 24px → 中心落在 32px,与导航图标中心(12 + 12 + 8)重合。
+  padding: 0 0.5rem 0 1.25rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  border-bottom: 1px solid var(--ih-line);
+}
+
+.app-brand-mark {
+  width: 1.5rem;
+  height: 1.5rem;
+  flex-shrink: 0; // 折叠态下不被压扁
+}
+
+// 折叠态:文字被移除,标记居中于 64px 栏 —— 与导航项的居中规则一致。
+.app-sidebar.collapsed .app-brand {
+  justify-content: center;
+  padding: 0;
+}
+
+.app-nav {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.75rem;
+  overflow-y: auto;
+
+  a {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.2rem 0.75rem;
+    border-radius: var(--p-border-radius-md);
+    color: var(--ih-ink-muted);
+    text-decoration: none;
+    white-space: nowrap;
+
+    &:hover {
+      background: var(--ih-hover);
+      color: var(--ih-ink);
+    }
+
+    &.router-link-exact-active {
+      // 选中态:品牌绿浅底 + 品牌绿文字色。--ih-brand-text 是专门为
+      // 「品牌绿做文字」准备的替代色(亮 #415a0b 对浅底 7.0:1;暗 #b9e556)。
+      background: var(--ih-brand-soft);
+      color: var(--ih-brand-text);
+      font-weight: 450;
+    }
+  }
+}
+
+.app-sidebar.collapsed .app-nav a {
+  justify-content: center;
+}
+
+.app-sidebar-foot {
+  padding: 0.75rem;
+  border-top: 1px solid var(--ih-line);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+// ── 侧边栏底部用户区 ──
+// 布局参照 .app-nav a(同样的内边距/圆角/文字色),让用户名看起来与导航项同族。
+// 折叠态:改为纵向居中,只留头像。
+.app-user {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+
+  // 底色:与报表页 Sprint 时间轴(.ds-panel)同一档 --ih-surface-sunken,
+  // 让「头像 + 用户名 + 角色标签」成为一块有边界的整体,而非漂在侧栏面上。
+  // ⚠ 刻意**不复制** .ds-panel 的 padding:那套 1rem 是为时间轴量身定的
+  //   (底部 0.5rem 需与滚动容器的 pb-2 相加才对称),照搬会再吃掉 32px 横向宽度 ——
+  //   165px 栏下用户名会重新被 ellipsis 吃完。留白由 .app-user-trigger 自带的
+  //   0.5rem 0.75rem 提供,视觉上等价于「面板内边距」,且不多占宽度。
+  // 圆角取 --p-border-radius-md 而非 .ds-panel 的 --ih-radius-sm:必须与
+  //   .app-user-trigger 的圆角**同径**,否则 hover 时高亮块会在四角露出底色月牙。
+  background: var(--ih-surface-sunken);
+  border-radius: var(--p-border-radius-md);
+
+  &.compact {
+    flex-direction: column;
+    align-items: center;
+    gap: 0.25rem;
+  }
+}
+
+.app-user-trigger {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex: 1;
+  min-width: 0;
+  padding: 0.5rem 0.75rem;
+  background: none;
+  border: none;
+  border-radius: var(--p-border-radius-md);
+  font: inherit;
+  color: var(--ih-ink-muted);
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+
+  &:hover {
+    background: var(--ih-hover);
+    color: var(--ih-ink);
+  }
+
+  // 头像不参与压缩:压它换不来可读的用户名,只会得到一颗被挤扁的头像
+  // (实测 165px 栏宽下曾被压到 12px)。
+  .p-avatar {
+    flex-shrink: 0;
+  }
+}
+
+.app-user.compact .app-user-trigger {
+  flex: none;
+  justify-content: center;
+  padding: 0.25rem;
+}
+
+// 身份块:用户名在上、角色标签在下。
+// ⚠ `align-items: stretch` 是必需的,不是随手写的 —— 纵向 flex 下若用 flex-start,
+// 子项宽度会退化为「内容宽」,`text-overflow: ellipsis` 因没有受限宽度而**永不触发**,
+// 过长的用户名会直接撑破容器。stretch 让用户名铺满可用宽度,省略号才生效。
+// 标签则单独用 align-self 还原为内容宽,免得被拉成通栏色块。
+.app-user-identity {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.15rem;
+  min-width: 0;
+
+  .p-tag {
+    align-self: flex-start;
+  }
+}
+
+.app-user-name {
+  font-size: 0.9375rem;
+  font-weight: 400;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
+}
+
+// ── 底部操作行:主题切换 + 折叠按钮 ──
+// 展开态两者分列两端;折叠态(64px 已放不下两个 2.5rem 按钮)改为纵向排列。
+.app-sidebar-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  &.compact {
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+}
+
+.app-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+// 主内容区 —— 原 `.ds-page`「页面壳」的职责已整体上收到此处。
+// 原先结构是 .app-content(1rem 灰边 + surface-50 底) 里再套一层 .ds-page
+// (2rem 内边距 + paper 底 + 大圆角),形成「灰边 + 白纸 + 圆角」的三明治;
+// 页面壳整层撤销后,内边距与底色由本层直接承担。
+// 页面根元素退化为纯 flex 容器(各页自己写 `flex flex-col gap-6`),
+// 垂直节奏从 .ds-page 的 gap:1.5rem 平移到 Tailwind 的 gap-6,视觉不变。
+// 用 paper 而非 surface-50:它是产品语义里的「页面底」,暗色下同样有对应值。
+// 内边距取 --ih-pad-base:与卡片内边距同源,见 tokens.scss。
+.app-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--ih-pad-base);
+  background: var(--ih-paper);
+}
+
+// 注:原有的手机端收窄断点(base 2rem → 640px 下 1rem)已删除 ——
+// 基础内边距统一降到 1rem 后,该断点两条分支值相同,成为空操作。
+// 若日后基础值需要调大,记得重新补回手机端断点。
+
+// 登录等单页居中容器
+.center-page {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}

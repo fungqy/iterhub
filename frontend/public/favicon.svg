@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="迭代信息看板">
+  <rect width="32" height="32" rx="7" fill="#aadb1e"/>
+  <g fill="#1e232c">
+    <rect x="7" y="17.5" width="4.6" height="7.5" rx="1.6"/>
+    <rect x="13.7" y="11" width="4.6" height="14" rx="1.6"/>
+    <rect x="20.4" y="14.5" width="4.6" height="10.5" rx="1.6"/>
+  </g>
+</svg>

@@ -1,0 +1,45 @@
+/* Tailwind 4 接入:只引 theme + utilities,不引 preflight(R1)。
+   preflight 会重置 button/input/table 默认样式,与 PrimeVue 冲突。
+   布局工具类(flex/grid/gap-*)不依赖 preflight,安全可用。
+
+   ⚠ 本文件是纯 CSS(由 @tailwindcss/vite 处理),**只能用 `/* *​/` 注释**。
+   `//` 在 CSS 里不是注释 —— 它会被当成选择器片段,把紧随其后的规则
+   挂到一个永不匹配的 `:is(...)` 选择器上(2026-09-14 实测踩坑,见下)。
+
+   `reset` 层(2026-09-14 新增)是**最低**一层,专放"修正 UA 默认值"的少量规则
+   (见 base.scss 顶部「最小 UA 重置」)。它必须低于 primevue/ds/utilities:
+   重置应当**输给**任何作者样式(PrimeVue 组件样式、.ds-* 组件类、工具类),
+   只在没人管的地方兜底。这与 Tailwind preflight 放在 own base 层是同一个道理。
+   顺序即优先级,本行与 main.ts 的 cssLayer.order 必须逐字一致。 */
+@layer reset, theme, primevue, ds, utilities;
+
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+
+/* ⚠ 必须显式补回 --spacing,否则所有间距类静默失效(2026-09-14 实测踩坑)。
+
+   原因:`tailwindcss/theme.css` 的写法是 `@theme default`,意为「仅作兜底、
+   被覆盖时不输出」。只 @import 而不写任何 @theme 块时,Tailwind 推断「无人
+   使用主题」,于是**一条 --spacing 都不输出**(实测产物中 `--spacing:` 命中 0 次)。
+   而 utilities 里 gap-6 / h-2 / w-8 / p-* 全部是 `gap: calc(var(--spacing) * 6)`
+   形式 —— 变量未定义 → calc() 非法 → 整条声明被浏览器丢弃,且**不报错**。
+
+   症状极隐蔽:类名确实生成了(产物里能找到 `.gap-6{gap:calc(var(--spacing)*6)}`),
+   但 DevTools 里 gap 显示为空、元素间距莫名消失。本项目曾有 21 个组件 98 处
+   gap-* 长期无效。
+
+   修法:`@theme inline` 在 @tailwindcss/vite 下对该 @import 链路不生效(已实测
+   两种位置都仍是 var() 形式),故改为在 theme 层直接声明变量 —— 工具类里的
+   var(--spacing) 本就按运行时读取,只要变量存在即可解析,无需字面量内联。
+   值与 Tailwind 默认一致(0.25rem),因此间距类行为回到官方预期。 */
+@layer theme {
+  :root {
+    --spacing: 0.25rem;
+  }
+}
+
+/* 注:@theme 语义色映射已移除 —— Tailwind 4.3 对 var() 间接引用的主题值
+   不生成工具类(已实测 text-ink/border-line 无产物)。语义色消费路径:
+   DOM 侧用 components.scss 的 .ds-* 类或任意值写法 text-[var(--ih-*)];
+   canvas 侧用 chartPalette.ts。token 单源仍在 tokens.scss。
+   注意:语义色**不受**上面 --spacing 问题影响,因为它们压根不走 Tailwind 工具类。 */

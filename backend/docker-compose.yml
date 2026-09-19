@@ -1,0 +1,49 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: iterhub-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - MSQL_DSN=mysql+pymysql://iteruser:iterpass123@db:3306/iterdb
+      - HOST=0.0.0.0
+      - PORT=8000
+    volumes:
+      - ./logs:/app/logs
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - iterhub-network
+    restart: unless-stopped
+
+  db:
+    image: mysql:8.0
+    container_name: iterhub-mysql
+    environment:
+      - MYSQL_ROOT_PASSWORD=rootpass123
+      - MYSQL_DATABASE=iterdb
+      - MYSQL_USER=iteruser
+      - MYSQL_PASSWORD=iterpass123
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./sql:/docker-entrypoint-initdb.d
+    networks:
+      - iterhub-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+networks:
+  iterhub-network:
+    driver: bridge
+
+volumes:
+  mysql-data:
