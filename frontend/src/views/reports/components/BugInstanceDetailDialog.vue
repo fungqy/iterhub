@@ -7,12 +7,35 @@ import { useSprintScope } from '@/composables/useSprintScope'
 import type { TagSeverity } from '@/constants/taskMeta'
 import { MAXIMIZED_DIALOG_PT } from '@/constants/dialogPt'
 import Dialog from 'primevue/dialog'
+import Drawer from 'primevue/drawer'
 import ProgressSpinner from 'primevue/progressspinner'
 import Tag from 'primevue/tag'
 import Timeline from 'primevue/timeline'
 
 /**
- * 统一的「故障详情」弹窗 —— **所有**故障列表里点任意一行都打开它。
+ * 统一的「故障详情」抽屉 —— **所有**故障列表里点任意一行都打开它。
+ *
+ * ── 为什么是抽屉而不是弹窗(2026-09-19)──
+ * 它原先是一个被 `MAXIMIZED_DIALOG_PT` 强制放大到 95vw×95vh 的模态弹窗。
+ * 问题不在尺寸,而在**模态**:它在四个列表(BugListDialog / ReportReopenDialog /
+ * AvgTimeDevelopersDialog / DocBugImport)里都是"点一行看一条",而模态弹窗会把**来源列表
+ * 一起盖住** —— 看完一条想再看下一条,只能关掉、再点开。
+ * 换成右侧抽屉(非模态)后,来源列表留在原地可继续点,本组件的内容随选中行替换。
+ * ⚠ 两个 prop 缺一不可,两条都能在 Drawer 源码里找到依据:
+ *   · `:modal="false"` —— 非模态时 PrimeVue 给遮罩层挂 `pointer-events: none`
+ *     (见 primevue/drawer/style/index.mjs 的 inlineStyles),
+ *     点击于是穿透到下方的源列表。这不是"漏掉遮罩",是抽屉的本义。
+ *   · `:dismissable="false"` —— ⚠ 非模态下 `dismissable`(默认 true)会命中
+ *     Drawer `enableDocumentSettings()` 里那条 `dismissable && !modal` 分支,
+ *     绑一个 **document 级(捕获阶段)的外部点击关闭**。而"点源列表的下一行"
+ *     恰好就是"点外部" ⇒ 抽屉会先被关掉、再被下一次点击重新打开,两者打架。
+ *     故必须关掉:本组件的用法就是"点外部 = 看下一条",不能拿它当"点击取消"。
+ *   代价(两条,都是有意接受的):① 没有「点空白处关闭」,关闭只剩右上角 × 与 Esc;
+ *   ② 键盘焦点被 Drawer 的 `v-focustrap` 锁在面板内(鼠标不受影响) ——
+ *      对"在面板内浏览长内容"而言这是正确的可访问性行为,不必绕开。
+ *
+ * ⚠ 尺寸口径**随之改变**:不再是 95vw×95vh,而是 `--ih-drawer-detail`(见 tokens.scss)。
+ *   下方 .bugdet-grid / .docbug-preview 的宽度注释已按新口径重算 —— 别再拿 95vw 反推。
  *
  * 故障有两种来源,共用同一个外壳与同一套版式,只有「额外那一段」不同:
  *   - RDM 故障(source='RDM'):字段取自 rdm_issue,额外一段 = **故障变更记录**(时间线);
@@ -434,7 +457,7 @@ function selectImage(i: number): void {
 watch(
   () => [props.visible, props.issueKey, props.source, sprintId.value] as const,
   async ([vis, key, , sid]) => {
-    // 父弹窗一关,原图弹窗必须跟着关:它是 teleport 到 body 的独立节点,不随父弹窗卸载,
+    // 本抽屉一关,原图弹窗必须跟着关:它是 teleport 到 body 的独立节点,不随抽屉卸载,
     // 少了这一句就会留下一张飘在页面上的原图(且没有任何入口能关掉它)。
     if (!vis) {
       viewerVisible.value = false
@@ -472,13 +495,13 @@ watch(
 </script>
 
 <template>
-  <Dialog
+  <Drawer
     :visible="visible"
+    position="right"
     :header="`${isDoc ? '文档故障' : '故障'} ${issueKey ?? ''}`"
-    class="ds-dialog-md ds-bugdetail"
-    modal
-    :pt="MAXIMIZED_DIALOG_PT"
-    dismissableMask
+    class="ds-drawer-detail ds-bugdetail"
+    :modal="false"
+    :dismissable="false"
     @update:visible="emit('update:visible', $event)"
   >
     <div v-if="loading" class="flex flex-col items-center gap-2 py-10">
@@ -606,7 +629,10 @@ watch(
     </template>
 
     <!-- ── 原图弹窗(点主视图那张图打开)──
-         嵌套 Dialog:两个弹窗都 teleport 到 body,层级由 PrimeVue 的全局 z-index 计数器决定
+         ⚠ 外层已是 Drawer,故这里是 **Drawer 里嵌 Dialog**。原图那个诉求(:show-header=false 的
+         整屏看图)与"抽屉 vs 弹窗"无关 —— 它本就需要 95vw×95vh 的空间,且没有"来源列表"要保留,
+         故**保持不变**,不跟着改。
+         两者都 teleport 到 body,层级由 PrimeVue 的全局 z-index 计数器决定
          (后打开的在上),不需要自己抬 z-index。
          ⚠ 这里**不**把显示状态回传给父级(不写 @update:visible → emit):关掉看图弹窗
          只应该关掉它自己;顺手把「故障详情」一起带走会让人以为是点错了关闭。
@@ -638,7 +664,7 @@ watch(
         />
       </div>
     </Dialog>
-  </Dialog>
+  </Drawer>
 </template>
 
 <style scoped>
@@ -650,7 +676,7 @@ watch(
    (即用户要的「无内容则没有右栏,但左栏大小与有右栏时一样」)。
    若改成 `1fr auto`,右栏只剩一句「暂无截图」时会被内容压窄、左栏变宽 ⇒ 版式随数据抖动。
    ⚠ `min-width: 0`:grid 项默认 `min-width:auto`,内部有 `overflow:auto` 的长文本会让
-   该列拒绝收缩到内容最小宽度以下(实测表现为左右栏挤出弹窗、内容被裁)。 */
+   该列拒绝收缩到内容最小宽度以下(实测表现为左右栏挤出容器、内容被裁)。 */
 .bugdet-split {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
@@ -690,13 +716,14 @@ watch(
   display: grid;
   /* 阈值 140px:分栏后左栏可用宽远不止 190px(见下),但**窄视口**下会掉到 ~400px,
      那时 140px 仍能排成两列;190px 则会在小屏退化成单列,16~19 个字段竖成长条。
-     ⚠ 别再拿 `ds-dialog-md` 的 760px 去算左栏宽度(踩过):模板上的 `ds-dialog-md`
-     只是初始尺寸,`MAXIMIZED_DIALOG_PT` 会把弹窗**强制放大**到 95vw × 95vh
-     (见 src/constants/dialogPt.ts 的实测口径)。故左栏 = (95vw − 弹窗内留白 − 1.25rem) / 2。
-     实测(探针 tmp-measure-labels,1440×1000):弹窗 1368 → split 1326 → 左栏 653 → 单轨 148px,4 列。
-     (加分隔线后左栏内容宽再减 0.625rem + 1px ≈ 642,4 列不变 —— 140px 的阈值仍有余量。)
-     全宽段列数:900/1024→2 列 · 1180/1280→3 列 · 1440/1600→4 列 · 1920→5 列;
-     上述各断点**最长标签「开发负责人」(65px)均不折行**,dt/dd 也始终同行 ⇒ 140px 有余量,不必再调。 */
+     ⚠ 左右栏宽度一律按**抽屉**口径算,别再拿弹窗时代的 95vw 反推(2026-09-19 已改右侧抽屉):
+       左栏 = (抽屉宽 − 容器内留白 − 1.25rem) / 2,抽屉宽 = `--ih-drawer-detail`
+       = min(1080px, 88vw)(见 tokens.scss / .ds-drawer-detail)。
+       实测(2026-09-19 改抽屉后复量,1440×900):抽屉 1080 → split 1032 → 左栏 506 → 单轨 152px,**3 列**。
+       列数由弹窗时代的 4 列降为 3 列,是换容器的**已知代价** —— 字段一个不少,
+       只是每行少摆一个;`auto-fit` 会自动重排,无需改这里的分栏数。
+       窄视口(≤ ~1227px,此时抽屉取 88vw 而非 1080)左栏继续收窄,依次回落 2 列。
+     ⚠ 上述各断点**最长标签「开发负责人」(65px)均不折行**,dt/dd 也始终同行 ⇒ 140px 仍有余量。 */
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 0.5rem 1.25rem;
   margin: 0;
@@ -750,12 +777,14 @@ watch(
 
 /* ── 长文本段(故障原因 / 描述、文档故障的 问题详述 / 原因分析 / 验证备注)──
    ⚠ 2026-09-17 撤掉 `max-height: 9rem`(用户:「下方还有区域可用,却也显示了滚动条」)。
-   成因:本弹窗是 95vh 的放大态,内容区 .p-dialog-content 自带 flex:1 + overflow-y:auto,
-   可用的竖向空间本来由**那一层**统一兜底;再给长文本框钉一个 9rem(144px)的天花板,
-   就变成「外面明明还空着几十上百 px,框里刚过 144px 就先滚起来」—— 内外两层滚动条,
-   而内层那条是凭空造出来的。
-   现在高度由内容决定:短则短(不留空盒),长则跟着长;真要超出弹窗时,仍由内容区那一层
-   滚动 —— 单一滚动条,层级也正确(整窗滚,而不是一小块文本自己在小窗里滚)。
+   成因:内容容器是整屏高的(当时是 95vh 的放大弹窗,现为全高的抽屉),其内容区自带
+   flex:1 + overflow-y:auto,可用的竖向空间本来由**那一层**统一兜底;再给长文本框
+   钉一个 9rem(144px)的天花板,就变成「外面明明还空着几十上百 px,框里刚过 144px
+   就先滚起来」—— 内外两层滚动条,而内层那条是凭空造出来的。
+   现在高度由内容决定:短则短(不留空盒),长则跟着长;真要超出容器时,仍由内容区那一层
+   滚动 —— 单一滚动条,层级也正确(整条滚,而不是一小块文本自己在小窗里滚)。
+   ⚠ 「内容区自带 flex:1 + overflow-y:auto」这个前提,换抽屉后**不再默认成立** ——
+     已在 components.scss 的 `.p-drawer-content` 覆写里显式钉住,不赌主题默认值。
    ⚠ `overflow: auto` 保留:没有高度上限时它不触发,只作窄视口/异常内容的兜底。 */
 .bugdet-longtext {
   padding: 0.5rem 0.625rem;
@@ -877,11 +906,14 @@ watch(
   max-width: 100%;
   /* 同时限高:截图是整屏图(实测有 2772×1458 这类宽幅,也可能出现竖版长图),
      只限宽会让竖版图把下方的元信息行与缩略图带顶到折叠线以下。限高后 img 会按比例缩放。
-     ⚠ 分栏后右栏可用宽仅 ≈ 333px,且「预览 + 元信息 + 缩略图带」三行要挤在一栏里,
-     故上限从 46vh/420px 收到 34vh/300px —— 否则 16:9 的截图按宽缩到 187px 高之后,
-     加上元信息行(约 24px)与缩略图带(70px + 间距),整栏会顶到弹窗折叠线以下。
+     ⚠ 限高的真正约束是**竖向**:「预览 + 元信息 + 缩略图带」三行要挤在同一栏里,
+     故上限收到 34vh/300px —— 否则 16:9 的截图按宽缩到 187px 高之后,
+     加上元信息行(约 24px)与缩略图带(70px + 间距),整栏会顶到容器折叠线以下。
+     ⚠ 旧注释写的「右栏可用宽仅 ≈ 333px」是**按 ds-dialog-md 的 760px 算的**,早已过期:
+     该弹窗后来被 `MAXIMIZED_DIALOG_PT` 撑到 95vw(右栏 653px),2026-09-19 又换成抽屉
+     (右栏 ≈ 500px)。宽度这项不影响本条成立 —— 限高管的是竖排,与栏宽无关。
      ⚠ 这里是**缩略图**的尺寸口径,别拿它当原图的:"看原图"已改由点图片开弹窗承担
-     (见 .docbug-fullimg),原图不在这张 333px 宽的栏里铺开。 */
+     (见 .docbug-fullimg),原图不在这条栏里铺开。 */
   max-height: min(34vh, 300px);
   width: auto;
   height: auto;
@@ -932,7 +964,8 @@ watch(
 }
 
 /* 键盘焦点环:全局那条(components.scss)只覆盖 .app-sidebar / .app-content,
-   而弹窗是 teleport 到 body 的,不在那两棵子树里 —— 够不到(同 .ds-metric.is-clickable 的做法)。 */
+   而本抽屉与原图弹窗都是 teleport 到 body 的,不在那两棵子树里 ——
+   够不到(同 .ds-metric.is-clickable 的做法)。 */
 .docbug-open:focus-visible {
   outline: 2px solid var(--ih-accent);
   outline-offset: 2px;

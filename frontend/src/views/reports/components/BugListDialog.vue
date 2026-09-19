@@ -135,8 +135,13 @@ function onRowClick(event: { data: BugListItem }): void {
     </DataTable>
     <div v-else class="ds-empty">暂无数据</div>
 
-    <!-- 详情作为本弹窗的子弹窗:两个 Dialog 都会 teleport 到 body,层级由 DOM 顺序决定,
-         子弹窗在后 → 盖在上面(与 BugDetailDialog → BugListDialog 的既有做法一致)。
+    <!-- ⚠ 详情自 2026-09-19 起是**非模态右侧抽屉**，不再是子弹窗。两件事必须分清：
+         ① 组件树里它仍是本弹窗的子级（Sprint 靠 provide/inject 传得下去），
+            但 DOM 上两者**都** teleport 到 body —— 不是父子关系；
+         ② 故层级**不由 DOM 顺序决定**：PrimeVue 每开一层就向自己的全局计数器取号
+            (ZIndex)，后开的 z-index 更大。实测「列表弹窗 < 抽屉(z=1104)」即由此而来。
+            靠"谁写在模板后面"判断层叠是错的。
+         抽屉非模态 ⇒ 底下的列表保持可点，这正是"看完一条直接点下一条"的前提。
          Sprint 不必往这里传 —— 详情组件自己从页面 provide 的下钻上下文里取(见 useSprintScope)。 -->
     <BugInstanceDetailDialog
       v-model:visible="detailVisible"

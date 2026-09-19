@@ -109,9 +109,18 @@
 
   /* ── 弹窗尺寸四档 ── */
   --ih-dialog-sm: min(500px, 95vw); /* 确认类:ManualExecuteDialog */
-  --ih-dialog-md: min(760px, 95vw); /* 表单/单表:ProjectList 编辑、BugInstanceDetailDialog、ReopenMembersDialog、TeamMembersDialog */
+  --ih-dialog-md: min(760px, 95vw); /* 表单/单表:ProjectList 编辑、ReopenMembersDialog、TeamMembersDialog */
   --ih-dialog-lg: min(1200px, 95vw); /* 宽表:DocBugImport、ReportReopenDialog、AvgTimeDevelopersDialog、BurndownDialog、SprintSummaryDialog、UnplannedStoriesDialog */
   --ih-dialog-xl: min(1360px, 95vw); /* 最宽表:BugDetailDialog、BugListDialog */
+
+  /* ── 抽屉尺寸 ──
+     刻意与上面四档**分开命名**,不复用 --ih-dialog-lg:两者宽度语义不同 ——
+     弹窗是「居中浮层,两侧对称留白」,抽屉是「贴边面板,右侧要留出源列表」,
+     取值依据不一样,混用会让「改弹窗档位」顺带改掉抽屉的可用空间。
+     ⚠ 88vw 这个份额是**给源列表留位**用的,不是审美值:低于它,抽屉一盖就没法
+       继续点"下一条" —— 而"能继续点"正是本组件从弹窗改成抽屉的唯一理由。
+     消费方:components.scss 的 .ds-drawer-detail → BugInstanceDetailDialog。 */
+  --ih-drawer-detail: min(1080px, 88vw);
 
   /* ── 统计卡渐变 ── */
   --ih-grad-total: linear-gradient(135deg, #4d6bfe 0%, #7a90ff 100%);

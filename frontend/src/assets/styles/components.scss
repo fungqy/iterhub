@@ -275,6 +275,14 @@
   outline: none;
 }
 
+// 抽屉头部的关闭按钮同口径。
+// 理由与上一条完全相同:Drawer 自己的 focus() 在找不到其它可聚焦元素时,同样把初始
+// 焦点落在关闭按钮上(见 primevue/drawer/Drawer.vue 的 focus()),于是打开瞬间会亮出
+// 一圈 focusRing。弹出与滑出是同一类入场,不该有"一个有环、一个没环"的差别。
+.p-drawer-header .p-button:focus-visible {
+  outline: none;
+}
+
 // 弹窗高度上限:整窗(页头 + 内容 + 页脚)最多占视口 95%。
 // ⚠ 必须写全局(本区块),不能写 SFC 内的 :deep(.p-dialog) —— Dialog 默认 teleport
 // 到 <body>,脱离了打开它的组件 DOM 子树,scoped 样式(含 :deep)都够不到它。
@@ -1618,6 +1626,61 @@ button.ds-metric {
 .ds-dialog-lg,
 .ds-dialog-xl {
   max-width: 95vw;
+}
+
+/* ── 抽屉尺寸 ──
+   与上方弹窗四档并列,但宽度**独立成 token**(--ih-drawer-detail,取值理由见 tokens.scss):
+   抽屉要保证"右侧还留得下源列表",这个约束弹窗没有。 */
+.ds-drawer-detail {
+  width: var(--ih-drawer-detail);
+}
+
+/* ⚠ 下面三条必须写在本区块(全局),不能写 SFC 内的 :deep(.p-drawer) ——
+   Drawer 与 Dialog 一样默认 teleport 到 <body>,脱离了打开它的组件 DOM 子树,
+   scoped 样式(含 :deep)都够不到。本区块是项目指定的「PrimeVue 内部覆写」唯一落点。
+   ✅ 这条**已实测**(2026-09-19 探针 105,不是推断):抽屉根节点的 data-v-* 属性列表是**空数组**
+      —— .p-drawer 上根本没有本组件的 scoped 标记。故两种 SFC 写法都不会命中:
+        · `.p-drawer { ... }`  编译成 `.p-drawer[data-v-x]`  ⇒ 根节点没这属性
+        · `:deep(.p-drawer-content)` 编译成 `[data-v-x] .p-drawer-content` ⇒ 祖先链上没有这属性
+   ⚠ 本文件在 ds 层(晚于 primevue 层),与原规则同特异性即可胜出,不需要 !important。 */
+.p-drawer {
+  /* 铺满视口高。抽屉贴哪条边、多宽,由主题与组件的 inlineStyles 负责,这里不管。 */
+  height: 100%;
+  /* 直角:抽屉是**贴边**面板 —— 右沿与视口齐平,给圆角会在那里留出一道缝,
+     而左沿才是真正可见的边界。
+     ⚠ 这与「放大态弹窗补回圆角」的口径相反,是有意的:弹窗四边都离屏,圆角成立;
+     抽屉只有一边在屏内,圆角不成立。 */
+  border-radius: 0;
+}
+
+/* 内容区:钉住「竖向怎么分配 + 溢出往哪滚」。
+   ⚠ 这两条**不默认**主题会给 —— 弹窗那边是 .p-dialog-content 自带 flex:1 + overflow:auto
+   (见本文件上方 .p-dialog 的注释),但那是 Dialog 的实现,Drawer 不保证同款:
+     缺 flex:1        ⇒ 内容区不占满剩余高度,长内容会把面板撑高、整条溢出视口;
+     缺 overflow-y:auto ⇒ 超出部分没有滚动容器,直接被裁掉。
+   ⚠ 本组件的长文本段刻意**不设** max-height,全靠这一层兜底
+   (见 BugInstanceDetailDialog.vue 的 .bugdet-longtext 注释),故这条是承重的。
+   ⚠ min-height:0 是 flex 子项能收缩到内容高度以下的必要条件 —— 缺了它,
+   flex:1 + overflow 这套组合不生效(子项拒绝收缩,依旧把父盒撑破)。 */
+.p-drawer-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* 抽屉的进出场节奏:与弹窗同一套(进 240ms / 出 180ms),曲线取值与理由见上方
+   .p-dialog-enter-active / .p-dialog-leave-active 的逐帧实测注释,此处不重复。
+   ⚠ 类名是 p-drawer-*,与 p-dialog-* **不共享规则** —— Drawer 模板里是
+   `<transition name="p-drawer">`(primevue/drawer/Drawer.vue),故必须各写一份;
+   少写一份的后果不是报错,而是抽屉退回主题默认的 300ms 曲线,与弹窗观感不一致。 */
+.p-drawer-enter-active {
+  animation-duration: 240ms;
+  animation-timing-function: cubic-bezier(0.05, 0.7, 0.1, 1);
+}
+
+.p-drawer-leave-active {
+  animation-duration: 180ms;
+  animation-timing-function: cubic-bezier(0.3, 0, 0.8, 0.15);
 }
 
 /* ── 空态 ── */

@@ -798,8 +798,10 @@ watch(() => props.visible, (val) => {
       </div>
     </div>
 
-    <!-- 统一的「故障详情」(字段 + 现场截图)。挂在导入弹窗内 → 弹窗层级由 DOM 顺序决定,
-         本草稿在后,故盖在导入弹窗之上。 -->
+    <!-- 统一的「故障详情」(字段 + 现场截图)。组件虽挂在本导入弹窗内，
+         但自 2026-09-19 起渲染为**非模态右侧抽屉**、teleport 到 body ——
+         ⚠ 故层级**不由 DOM 顺序决定**，而是 PrimeVue 每次开浮层向全局计数器取号（后开的更大）。
+         抽屉非模态 ⇒ 底下的导入弹窗仍可点，两边互不遮挡。 -->
     <BugInstanceDetailDialog
       v-model:visible="docDetailVisible"
       source="DOC"
