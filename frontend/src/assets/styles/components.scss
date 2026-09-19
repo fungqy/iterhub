@@ -1651,6 +1651,25 @@ button.ds-metric {
      ⚠ 这与「放大态弹窗补回圆角」的口径相反,是有意的:弹窗四边都离屏,圆角成立;
      抽屉只有一边在屏内,圆角不成立。 */
   border-radius: 0;
+  /* ⛔ 这一条不是"清理",是**承重**的 —— 别删,也别以为它只管手感。
+     主题的 `.p-drawer` 基类自带 `transition: transform 0.3s`,而抽屉的进出场是**动画**
+     (`.p-drawer-leave-active` 上的 keyframes),不是过渡。两者同时挂着会踩中 Vue 的选型规则
+     (runtime-dom 的 getTransitionInfo):
+       timeout = max(transitionTimeout, animationTimeout)
+       type    = transitionTimeout > animationTimeout ? TRANSITION : ANIMATION
+     ⇒ 300ms > 180ms,于是它去等一个 **transitionend**;可这一趟里没有任何属性真的在过渡,
+     事件永不触发,只能落到 `setTimeout(end, timeout + 1)` 的兜底 = **301ms** 才摘元素。
+     而 keyframes 没写 fill-mode(默认 none)⇒ 动画 180ms 一结束,transform 立刻回落成
+     基类的 translate3d(0,0,0) —— **面板整个弹回屏幕内**,并一直停在那里到 301ms。
+     观感即「滑出去 → 闪回来一下 → 消失」。
+     逐帧实测(verify-ui/flicker108/cdp108.mjs,1440 视口):基线 animationend=177ms、
+     元素 326ms 才摘,中间 **8 帧 / 117ms 面板停在静止位且完全可见**;
+     清掉这条过渡后 transitionTimeout=0 ⇒ Vue 改选 ANIMATION 类型,animationend 一响即摘
+     (实测动画结束与摘除是同一帧 174.5ms,零闪回帧)。
+     ⚠ 别改用 `animation-fill-mode: forwards` 绕:那只是把"闪回来"压成"看不见",
+       元素照样白挂 120ms(且它是 `pointer-events:auto` 的),根因没动。
+     ⚠ 主题自己也走这条路:全屏抽屉那条规则同样把 transition 清成了 none。 */
+  transition: none;
 }
 
 /* 内容区:钉住「竖向怎么分配 + 溢出往哪滚」。
@@ -1672,7 +1691,12 @@ button.ds-metric {
    .p-dialog-enter-active / .p-dialog-leave-active 的逐帧实测注释,此处不重复。
    ⚠ 类名是 p-drawer-*,与 p-dialog-* **不共享规则** —— Drawer 模板里是
    `<transition name="p-drawer">`(primevue/drawer/Drawer.vue),故必须各写一份;
-   少写一份的后果不是报错,而是抽屉退回主题默认的 300ms 曲线,与弹窗观感不一致。 */
+   少写一份的后果不是报错,而是抽屉退回主题默认的 300ms 曲线,与弹窗观感不一致。
+   ⚠⚠ **动这两个时长之前,先读上方 `.p-drawer` 里那条 `transition: none` 的注释** ——
+     两者是**绑在一起**的:主题基类那条 `transition: transform 0.3s` 一旦回来,
+     这里取什么值就会改变 Vue 的选型分支(超过 300ms 则改走 ANIMATION),
+     「关闭闪一下」会**看起来自己好了** —— 那是巧合,不是修法。
+     现在过渡已清掉 ⇒ 这两个时长怎么调都不会再闪。 */
 .p-drawer-enter-active {
   animation-duration: 240ms;
   animation-timing-function: cubic-bezier(0.05, 0.7, 0.1, 1);
