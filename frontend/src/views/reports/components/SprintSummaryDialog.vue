@@ -585,18 +585,18 @@ function openWorktimeMismatch() {
           <span v-else class="ds-metric-sub">样本 {{ summary.story_sample_count }} 个</span>
         </div>
 
-        <!-- 用例数:归属口径 = 用例「测试要点」引用的故事 ∩ 本 Sprint 故事(见后端 docstring)。
+        <!-- 用例数:归属口径 = 用例引用的故事 ∩ 本 Sprint 故事(见后端 docstring)。
              与「任务数」同为计数卡,故形态沿用 is-plain + 口径副标题。 -->
         <div class="ds-metric is-plain tone-info">
           <span class="ds-metric-label">用例数<MetricHelp :help="METRIC_HELP.caseCount" /></span>
           <span class="ds-metric-value">
             {{ summary.case_count }}<span class="ds-metric-unit">条</span>
           </span>
-          <span class="ds-metric-sub">按「测试要点」归属统计</span>
+          <span class="ds-metric-sub">按用例关联的故事归属</span>
         </div>
 
         <!-- 用例覆盖率:本 Sprint 内「至少被一个用例关联过」的故事占比,与「用例数」
-             同源(rdm_testcase.story_key 就是被用例「测试要点」引用到的故事 key)。
+             同源(rdm_testcase.story_key 就是被用例引用到的故事 key)。
              载体选进度条卡而非环图:除比率外还要同时交代已覆盖/未覆盖两个故事数,
              环内只放得下一个百分比。分档沿用故事完成率的阈值,低覆盖一眼可辨。
              无故事时 rate 为 null → 整卡预留(与「计划外故事占比」同规则)。 -->

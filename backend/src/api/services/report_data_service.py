@@ -34,8 +34,7 @@ def _run_report_data_task(
     with _report_data_status_lock:
         _report_data_status[sprint_id]["status"] = "running"
     try:
-        # 手动刷新强制全量拉取测试用例,保证与 RDM 完全一致
-        process_sprint(sprint, testcase_full=True)
+        process_sprint(sprint)
         with _report_data_status_lock:
             _report_data_status[sprint_id]["status"] = "success"
             _report_data_status[sprint_id]["finished_at"] = time.time()

@@ -297,7 +297,7 @@ CREATE TABLE `rdm_story_changelog` (
 
 
 -- iterdb.rdm_testcase definition
--- 测试用例不在 sprint 内,通过用例"测试要点"字段(customfield_11104)引用的故事key归属 sprint
+-- 测试用例由「文档导入」写入,归属 sprint 由用例引用的故事号(【需求】列)反查 rdm_issue 得到
 
 CREATE TABLE `rdm_testcase` (
   `case_id` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '用例issue_id',
@@ -306,7 +306,7 @@ CREATE TABLE `rdm_testcase` (
   `status` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '用例状态',
   `exec_status` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '执行状态(cf_11107)',
   `module` varchar(512) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '模块(cf_11102)',
-  `story_key` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '归属故事key(由测试要点解析)',
+  `story_key` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '归属故事key(文档导入的【需求】列)',
   `labels` varchar(512) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '标签',
   `description` mediumtext COLLATE utf8mb4_unicode_ci COMMENT '描述',
   `steps` mediumtext COLLATE utf8mb4_unicode_ci COMMENT '测试步骤(JSON数组:no/action/data/expected)',

@@ -1104,9 +1104,9 @@ async def get_sprint_summary(
     - 故事平均完成时长:rdm_story_duration.duration(工作日秒)
     - 故事完成率:故事类中 status ∈ {已完成, 待验收} 的占比。**待验收计为完成** ——
       开发侧已交付、只差验收动作,若排除会把收口进度系统性低估。
-    - 用例数 / 用例数每故事:rdm_testcase 中归属该 Sprint 的用例。归属口径与采集侧
-      一致——用例不挂 Sprint,靠「测试要点」(customfield_11104) 引用故事 key,与
-      Sprint 内故事求交集后落库(见 util/jira.py 的 Sprint.testcases)。
+    - 用例数 / 用例数每故事:rdm_testcase 中归属该 Sprint 的用例。该表由「文档导入」
+      (doc-import 的测试用例导入)写入,归属口径 = 用例的 story_key(取自文档【需求】列)
+      落在本 Sprint 的故事里。
       ⚠ 用例数取 COUNT(DISTINCT case_id):rdm_testcase 的唯一键是 (case_id, story_key),
       一个用例引用多个故事时会落多行,按行计数会把同一个用例重复累计。
       用例数每故事 = 用例数 / 故事数;故事数为 0 时返回 null(无分母,与其余比率同规则)。
@@ -1175,18 +1175,18 @@ async def get_sprint_summary(
 
         # ── 用例数(rdm_testcase) ──
         # 取 DISTINCT case_id 而非 COUNT(*):唯一键是 (case_id, story_key),一个用例的
-        # 「测试要点」引用多个故事时会落多行,按行计数会把同一用例重复累计。
+        # 【需求】引用多个故事时会落多行,按行计数会把同一用例重复累计。
         case_count = int(session.execute(text("""
             SELECT COUNT(DISTINCT case_id) FROM rdm_testcase
             WHERE sprint_id = :sprint_id
         """), {"sprint_id": sprint_id}).fetchone()[0] or 0)
 
         # ── 用例覆盖率:本 Sprint 内「被测试用例关联过」的故事数 ──
-        # 关联关系就是 rdm_testcase.story_key —— 采集侧写入的每一行都代表「某用例的
-        # 测试要点引用了某故事」(见 util/jira.py 的 Sprint.testcases),故按 story_key
-        # join 即可,不再附加用例侧的 sprint_id 条件:故事从 A 迭代挪到 B 迭代时,
-        # _write_testcases 只按用例自身的 refs 清理,旧行的 sprint_id 会停在 A,
-        # 带上该条件会让 B 迭代里这些确实被覆盖的故事被漏掉。
+        # 关联关系就是 rdm_testcase.story_key —— 导入侧写入的每一行都代表「某用例的
+        # 【需求】引用了某故事」,故按 story_key join 即可;不附加用例侧的 sprint_id
+        # 条件:故事从 A 迭代挪到 B 迭代时,导入侧按用例自身的需求清理旧行,
+        # rdm_testcase.sprint_id 会停在导入当时解析出的迭代,带上该条件会让 B 迭代里
+        # 这些确实被覆盖的故事被漏掉。
         # 反方向(用例侧多出来的行)由 JOIN rdm_issue 天然夹住:分子只会数到本 Sprint
         # 真实存在的故事,故「分子 ≤ 分母」有保证,覆盖率不可能超过 100%。
         case_covered_story_count = int(session.execute(text("""
@@ -1325,7 +1325,7 @@ async def get_sprint_summary(
             "avg_bug_test_seconds": int(avg_bug[1] or 0),
             "avg_bug_finish_seconds": int(avg_bug[2] or 0),
 
-            # 用例:归属口径见 docstring(测试要点引用故事 ∩ 本 Sprint 故事)
+            # 用例:归属口径见 docstring(用例引用的故事 ∩ 本 Sprint 故事)
             "case_count": case_count,
             # 分母为 0 → null(「无样本」≠ 0),与其余比率同规则
             "case_per_story": (

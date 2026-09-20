@@ -1,21 +1,13 @@
 from __future__ import annotations
 
 import base64
-import csv
-import io
-import json
 import logging
-import re
 import time
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
 import requests
 
 logger = logging.getLogger("Jira")
-
-# 匹配 issue key(如 EMBODIED_ADP-4038),用于从富文本字段中提取引用
-ISSUE_KEY_RE = re.compile(r"[A-Z][A-Z0-9_]+-\d+")
 
 
 def _get_with_retry(
@@ -299,178 +291,6 @@ class Sprint:
             changlog["sprint_name"] = self.sprint_name
 
         return report_issues, report_stories_changelogs, report_bugs_changelogs
-
-    def _test_steps(self, case_key: str) -> str | None:
-        """获取用例的测试步骤,返回 JSON 字符串(失败返回 None)
-
-        synapseRT 插件的 REST API 未开放,但步骤可通过其 CSV 导出接口获取,
-        表头固定为: #, 步骤, 测试数据, 期望结果。
-        """
-        url = f"{self.api_url}/plugins/servlet/exportTestSteps"
-        resp = requests.get(
-            url, headers=self.headers, params={"issueKey": case_key}, timeout=60
-        )
-        if resp.status_code != 200:
-            logger.warning(
-                "获取测试步骤失败, HTTP %s %s (case=%s)",
-                resp.status_code,
-                resp.reason,
-                case_key,
-            )
-            return None
-        # 用 utf-8-sig 解码去除 CSV 头部的 UTF-8 BOM
-        rows = list(csv.reader(io.StringIO(resp.content.decode("utf-8-sig"))))
-        if len(rows) < 2:
-            return None
-        header = rows[0]
-        try:
-            idx = {name: header.index(name) for name in ("#", "步骤", "测试数据", "期望结果")}
-        except ValueError:
-            logger.warning("测试步骤CSV表头不符合预期: %s (case=%s)", header, case_key)
-            return None
-        width = max(idx.values())
-        steps = [
-            {
-                "no": row[idx["#"]],
-                "action": row[idx["步骤"]],
-                "data": row[idx["测试数据"]],
-                "expected": row[idx["期望结果"]],
-            }
-            for row in rows[1:]
-            if len(row) > width
-        ]
-        return json.dumps(steps, ensure_ascii=False) if steps else None
-
-    def _fetch_testcase_page(
-        self, jql: str, fields: str, start_at: int, page_size: int
-    ) -> dict:
-        """拉取测试用例搜索的一页结果,失败直接抛异常(避免静默丢页导致数据不完整)"""
-        resp = requests.get(
-            f"{self.api_url}/rest/api/2/search",
-            headers=self.headers,
-            params={
-                "jql": jql,
-                "startAt": start_at,
-                "maxResults": page_size,
-                "fields": fields,
-            },
-            timeout=120,
-        )
-        if resp.status_code != 200:
-            raise RuntimeError(
-                f"获取测试用例失败, HTTP {resp.status_code} {resp.reason} (jql={jql})"
-            )
-        return resp.json()
-
-    def _testcase_total(self, jql: str) -> int:
-        """maxResults=0 快速探测 total(成本随结果数增长,空结果查询很快)"""
-        resp = requests.get(
-            f"{self.api_url}/rest/api/2/search",
-            headers=self.headers,
-            params={"jql": jql, "maxResults": 0},
-            timeout=120,
-        )
-        if resp.status_code != 200:
-            raise RuntimeError(
-                f"获取测试用例总数失败, HTTP {resp.status_code} {resp.reason} (jql={jql})"
-            )
-        return resp.json().get("total", 0)
-
-    def testcases(
-        self, story_keys: list[str], since: str | None = None
-    ) -> list[dict]:
-        """获取与 sprint 内故事关联的测试用例
-
-        测试用例不挂在 sprint 下,而是通过"测试要点"字段(customfield_11104)
-        引用故事key。此处分页拉取项目测试用例,解析引用后与 sprint 内故事求交
-        集,命中的用例即归属当前 sprint。一个用例引用多个 sprint 内故事时输出多行。
-        :param story_keys: sprint 内故事/简单故事的 issue key 列表
-        :param since: 增量同步起始时间(格式 YYYY-MM-DD HH:MM),仅拉取此后更新的用例;
-            None 时走全量(并行分页)
-        :return: 测试用例报表行列表,每行含 refs 字段(该用例引用的全部故事key,
-            供写入侧清理不再被引用的旧行)
-        """
-        story_key_set = set(story_keys)
-        if not story_key_set:
-            return []
-
-        jql = f'project={self.project_id} AND issuetype = "测试用例"'
-        if since:
-            jql += f' AND updated >= "{since}"'
-        fields = (
-            "summary,status,description,labels,created,updated,"
-            "customfield_11102,customfield_11107,customfield_11104"
-        )
-        page_size = 500
-
-        # 空查询快速探 total,然后所有分页一次性并行拉取
-        total = self._testcase_total(jql)
-        pages: list[list] = []
-        page_starts = list(range(0, total, page_size))
-        if page_starts:
-            if since:
-                # 增量结果少,串行即可
-                for start_at in page_starts:
-                    pages.append(
-                        self._fetch_testcase_page(jql, fields, start_at, page_size)[
-                            "issues"
-                        ]
-                    )
-            else:
-                with ThreadPoolExecutor(max_workers=8) as pool:
-                    futures = [
-                        pool.submit(
-                            self._fetch_testcase_page, jql, fields, st, page_size
-                        )
-                        for st in page_starts
-                    ]
-                    for f in futures:
-                        # result() 会重新抛出 worker 异常,避免静默丢页
-                        pages.append(f.result()["issues"])
-
-        cases: list[dict] = []
-        for issues in pages:
-            for issue in issues:
-                fields_map = issue["fields"]
-                # 测试要点字段经 search 接口返回富文本,需正则提取引用的故事key
-                refs = ISSUE_KEY_RE.findall(
-                    fields_map.get("customfield_11104") or ""
-                )
-                hits = {k for k in refs if k in story_key_set}
-                if not hits:
-                    continue
-                # 步骤按用例维度获取,同用例多故事引用时复用一次结果
-                steps = self._test_steps(issue["key"])
-                for story_key in sorted(hits):
-                    cases.append(
-                        {
-                            "case_id": issue.get("id"),
-                            "case_key": issue.get("key"),
-                            "case_name": fields_map.get("summary"),
-                            "status": (fields_map.get("status") or {}).get("name"),
-                            "exec_status": (
-                                fields_map.get("customfield_11107") or {}
-                            ).get("value"),
-                            "module": fields_map.get("customfield_11102"),
-                            "story_key": story_key,
-                            "labels": ", ".join(fields_map.get("labels") or [])
-                            or None,
-                            "description": fields_map.get("description"),
-                            "steps": steps,
-                            "sprint_id": self.sprint_id,
-                            "sprint_name": self.sprint_name,
-                            "project_id": self.project_id,
-                            "project_name": self.project_name,
-                            "created": to_beijing_mysql_datetime(
-                                fields_map.get("created")
-                            ),
-                            "updated": to_beijing_mysql_datetime(
-                                fields_map.get("updated")
-                            ),
-                            "refs": sorted(set(refs)),
-                        }
-                    )
-        return cases
 
 
 @dataclass

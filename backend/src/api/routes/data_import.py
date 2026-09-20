@@ -1476,13 +1476,10 @@ def validate_doc_bugs(
 #
 # ★ 迭代归属的权威口径 = `rdm_issue`(不是用户选的,也不是写死的):
 #     故事号 → rdm_issue.issue_key → rdm_issue.sprint_id / sprint_name
-#   与两处既有实现同源,改这个模块前先认这一点:
-#     · 报表「用例覆盖率」就是这么 join 的(reports.py: rdm_testcase.story_key
-#       ∩ rdm_issue.issue_key);
-#     · 同步侧写 rdm_testcase 时,sprint_id 取的是「当时正在同步的那个迭代」
-#       (util/jira.py 的 Sprint.testcases),即**用例所属故事所在的迭代**。
-#   ⚠ 别拿 rdm_testcase 自己的 sprint_id 反推归属:reports.py 的注释已写明它会停在
-#     旧迭代(故事挪迭代后,同步侧只按用例自身的 refs 清理,不回头改旧行)。
+#   与报表「用例覆盖率」同源(reports.py: rdm_testcase.story_key ∩ rdm_issue.issue_key),
+#   改这个模块前先认这一点。
+#   ⚠ 别拿 rdm_testcase 自己的 sprint_id 反推归属:它记的是导入当时解析出的迭代,
+#     故事挪迭代后旧行不会自动跟着改(见下方「清空」规则)。
 #
 # ★ 校验与导入**共用 evaluate_testcase_import(),刻意没有 strict 开关** ——
 #   与「文档故障导入」相反(那边校验严、导入宽是拍板过的取舍)。理由:用户要求
@@ -1495,7 +1492,6 @@ def validate_doc_bugs(
 #      故必须先按【关键字】向下归并成用例,再把 N 行折成 steps JSON —— 否则一份
 #      3 行的文档会被读成「3 个用例,其中 2 个没有编号」。
 #   2. **源文档没有 Jira 数字 issue id。** rdm_testcase 的唯一键是 (case_id, story_key),
-#      而同步侧存的 case_id 是 Jira 数字 id(实测 '611885',case_key 是 'CMP-2168')。
 #      这里**拿 case_key 顶替** case_id:不能用 NULL —— MySQL 唯一索引把 NULL 视作
 #      互不相同,重导同一份文档会不断追加重复行,幂等直接失效。
 #   3. **故事号必须能在 rdm_issue 里查到,否则整份文件拒绝**(用户 2026-09-18 拍板)。
@@ -1507,23 +1503,19 @@ def validate_doc_bugs(
 #      ⚠ 同理,解出的迭代若属于**别的项目**也拒绝:否则会把用例挂到另一个项目的迭代上,
 #        而这类错挂没有任何界面看得出来(列表按 project_id 过滤,两边都不显示异常)。
 #
-# ⚠ **写入目标是 rdm_testcase —— 与 RDM 同步任务共表**(用户 2026-09-18 拍板)。
-#   由此带来两条必须记住的后果,改这个模块前先读:
-#   · 「清空」已按**本次文档的故事号**精确删(2026-09-18 二改),不再按迭代/整项目删
-#     —— 共用表没有来源列,唯一能框住「本次导入」的维度就是文档自己引用了哪些故事;
-#   · 同步任务若日后带回同一用例的数字 case_id,同一用例会变成两行(它按 case_id 清理,
-#     不认我们的 case_key),届时 COUNT(DISTINCT case_id) 会重复计数。这不是 bug,
-#     是选此方案的已知代价 —— 换成独立表可以根治,但那要改报表口径。
+# ⚠ **写入目标是 rdm_testcase —— 该表由本「文档导入」通道唯一写入**
+#   (RDM 侧的测试用例自动采集已下线,表未设来源列)。
+#   「清空」因此按**本次文档的故事号**精确删(2026-09-18 二改),不再按迭代/整项目删
+#   —— 唯一能框住「本次导入」的维度就是文档自己引用了哪些故事。
 
 TESTCASE_COLUMN_ALIASES: dict[str, list[str]] = {
     "case_key": ["关键字"],
     "case_name": ["概要"],
-    # 源文档没有用例状态列(库里同步侧写的是 Jira status,如「待办」)→ 落 NULL,不猜。
+    # 源文档没有用例状态列 → 落 NULL,不猜。
     "status": ["状态"],
     "exec_status": ["最新结果", "执行状态"],
-    # ⚠ module 取【测试用例集】而不是【模块】:同步侧的 module 存的是 customfield_11102,
-    #   该字段在库里的实际值是「数据采集平台md-dc-sp1测试用例集」这种**用例集名**
-    #   (见 rdm_testcase 现有 1351 行);而 Jira 标准「模块」列在这份导出里是空的。
+    # ⚠ module 取【测试用例集】而不是【模块】:Jira 标准「模块」列在这份导出里是空的,
+    #   而【测试用例集】的实际值是「数据采集平台md-dc-sp1测试用例集」这种**用例集名**。
     #   两者都留作别名,顺序即优先级。
     "module": ["测试用例集", "模块"],
     "story_key": ["需求"],
@@ -1618,8 +1610,8 @@ def build_testcase_cases(
       「一个用例一行」保证的。
 
     ⚠ 需求取并集后**展开成多行**(每 (case_key, story_key) 一行),这是刻意的:
-      rdm_testcase 的唯一键就是 (case_id, story_key),同步侧一个用例引用多个故事时
-      也是这么落的(见 report_rdm_data._write_testcases)。
+      rdm_testcase 的唯一键就是 (case_id, story_key),故一个用例引用多个故事时
+      必须落多行,否则唯一键约束下会丢归属。
 
     返回结构 (消费方见 upload_testcases):
       ok / errors / total_rows / cases:[{...,"story_keys":[...],"refs_note"}] /
@@ -1816,7 +1808,7 @@ def evaluate_testcase_import(
       fatal           : True ⇒ 整份文件不可导入(调用方直接 400 / 渲染成错误态)
       ok              : 表头是否齐备(与 fatal 分开:表头不齐时连行都读不了)
       rows            : 待写入的行(每个「用例 × 故事」一行);fatal 时为 []
-      case_refs       : {case_key: [story_key, ...]} 供调用方清理旧行(与同步侧同规则)
+      case_refs       : {case_key: [story_key, ...]} 供调用方清理旧行(见 DELETE_TESTCASE_STALE_SQL)
       stories         : 本次覆盖的故事号及其迭代归属
       missing_stories : 查不到的故事号(fatal 的原因之一)
       errors / skipped / total_rows / case_count / step_count / case_sets / encoding 等
@@ -1965,8 +1957,8 @@ def testcase_report(result: dict[str, Any], *, encoding: str, file_size: int) ->
 
 
 # 幂等写入:唯一键 (case_id, story_key) —— case_id 用 case_key 顶替(理由见本节开头)。
-# ON DUPLICATE 里**不更新 created**:文档没有这个信息,插入时写的 NULL 不该在重导时
-# 把同步任务写过的真实创建时间抹掉。
+# ON DUPLICATE 里**不更新 created**:本通道不产出创建时间(插入即 NULL),
+# 重导时不该把该列已有值抹掉。
 TESTCASE_UPSERT_SQL = text("""
     INSERT INTO rdm_testcase
         (case_id, case_key, case_name, status, exec_status, module, story_key,
@@ -1987,8 +1979,8 @@ TESTCASE_UPSERT_SQL = text("""
         updated = new.updated
 """)
 
-# 用例改引其他故事时删掉旧行 —— 与 report_rdm_data._write_testcases 同一规则,
-# 否则重导后「旧故事 + 新故事」两行并存,覆盖率会把一个已解绑的故事算成被覆盖。
+# 用例改引其他故事时删掉旧行,否则重导后「旧故事 + 新故事」两行并存,
+# 覆盖率会把一个已解绑的故事算成被覆盖。
 DELETE_TESTCASE_STALE_SQL = text("""
     DELETE FROM rdm_testcase
     WHERE case_id = :case_id
@@ -2051,7 +2043,7 @@ class ClearTestcasesRequest(BaseModel):
     """清空的范围 = **本次文档涉及的故事号**(用户 2026-09-18 拍板)。
 
     ⚠ 刻意**不接受**「整个项目」这种口径:sprint_id 入参已随「去掉选择 Sprint」一并移除,
-      而共用表里没有来源列,唯一能框住「本次导入」的维度就是文档自己引用了哪些故事。
+      唯一能框住「本次导入」的维度就是文档自己引用了哪些故事。
       story_keys 为空 ⇒ 400,把「误删整个项目」这条路直接堵死(实测数据工具链平台有 1351 行)。
     """
 
@@ -2066,9 +2058,8 @@ async def clear_testcases(
 ):
     """删除「本次文档涉及的故事号」下的测试用例。
 
-    ⚠⚠ **rdm_testcase 与 RDM 同步任务共表**,故这里的删除**不区分来源** —— 只要某条用例
-      关联的故事号在本次文档里,就会一起删掉(含同步任务写入的那条)。这是选「共用一张表」
-      方案的已知代价:表里没有 source 列。前端因此在确认框里必须写清删的是「故事号范围」,
+    ⚠⚠ **rdm_testcase 未设来源列**,故这里的删除**不区分来源** —— 只要某条用例关联的
+      故事号在本次文档里,就会一起删掉。前端因此在确认框里必须写清删的是「故事号范围」,
       不能只说「清空本次导入的数据」。
     """
     story_keys = sorted({k for k in request.story_keys if k})
@@ -2103,9 +2094,9 @@ TESTCASE_SELECT_COLUMNS = """
 def _testcase_row_to_item(row) -> dict[str, Any]:
     """一行 → 接口字典。
 
-    ⚠ step_count 在 Python 侧数,不用 SQL 的 JSON_LENGTH:steps 是 mediumtext 且同步侧
-      可能写入 None 或半截 JSON(`_test_steps` 失败即返回 None),`JSON_LENGTH` 遇到
-      非 JSON 文本会**直接报错**整条查询,而这里只是少一个数字。
+    ⚠ step_count 在 Python 侧数,不用 SQL 的 JSON_LENGTH:steps 是 mediumtext,可能为空或
+      非 JSON 文本,`JSON_LENGTH` 遇到非 JSON 文本会**直接报错**整条查询,
+      而这里只是少一个数字。
     """
     steps_raw = row[12]
     step_count = 0
@@ -2146,7 +2137,7 @@ async def list_testcases(
 ):
     """列出已入库的测试用例 —— 「检查已有数据」那一步的数据源。
 
-    ⚠ 结果里**包含 RDM 同步任务写入的行**,不只有文档导入的:表是共用的,没有来源列
+    ⚠ 结果里**包含该表此前导入的行**,不只有本次文档会覆盖的:表未设来源列
       (见本节的方案说明)。前端提示文案必须说清这一点。
       ⚠ story_keys 收窄同样服务于这一点:去掉选 Sprint 后,「这份文档会不会重复导入」
         只能靠文档自己引用了哪些故事来界定,别再退回「按项目全量列」。
@@ -2194,16 +2185,16 @@ def upload_testcases(
     """导入文档测试用例(CSV)。
 
     与其他导入路径的分工:
-      · 【关键字】相同的行归并成一个用例,步骤折成 steps JSON(键名与同步侧逐字一致:
-        no / action / data / expected,见 util/jira.py 的 _test_steps);
+      · 【关键字】相同的行归并成一个用例,步骤折成 steps JSON(键名:
+        no / action / data / expected);
       · **迭代归属由故事号反查**(不再由前端传 sprint_id):走 evaluate_testcase_import,
         与 /testcases/validate 是同一份实现 —— 校验说能导,这里就一定导得进去;
       · 故事号必须能在 rdm_issue 里查到、且所属迭代属于所选项目,否则**整份拒绝**;
         需求为空的用例同样拒绝 —— 唯一键 (case_id, story_key) 里 NULL 互不相等,
         写进去既没有迭代归属,也无法幂等重导。
 
-    ⚠ 写入 rdm_testcase 前会按 case_id 清掉不再被引用的旧 story_key 行(与同步侧同规则),
-      故「文档里把需求从 A 改成 B」这种改动能被正确反映,不会留下 A 的残留行。
+    ⚠ 写入 rdm_testcase 前会按 case_id 清掉不再被引用的旧 story_key 行,故「文档里把
+      需求从 A 改成 B」这种改动能被正确反映,不会留下 A 的残留行。
 
     ⚠ 同步 def 而非 async def,理由同 upload_doc_bugs(解析重活不能占事件循环)。
     """
@@ -2240,7 +2231,7 @@ def upload_testcases(
                 return report
 
             try:
-                # 按用例清旧的 story_key 行(与同步侧同规则),再 upsert
+                # 按用例清旧的 story_key 行,再 upsert
                 for case_key, refs in evaluated["case_refs"].items():
                     session.execute(
                         DELETE_TESTCASE_STALE_SQL,

@@ -145,9 +145,8 @@ export interface UploadResponse {
 /**
  * 一行测试用例(rdm_testcase)。
  *
- * ⚠ 这是**共用表**:RDM 同步任务与文档导入写的是同一张表,故列表里会同时出现两种来源
- *   的行,而表里没有来源列可以区分(见后端 data_import.py 的「文档测试用例导入」小节)。
- *   界面上的提示文案必须说清这一点,否则用户会以为「怎么多出些没导过的用例」。
+ * ⚠ 该表由「文档导入」通道唯一写入(RDM 侧的测试用例自动采集已下线),
+ *   故列表里的行都来自文档导入(见后端 data_import.py 的「文档测试用例导入」小节)。
  */
 export interface TestcaseRecord {
   case_key: string | null
@@ -394,8 +393,8 @@ export const dataImportApi = {
   /**
    * 删除「本次文档涉及的故事号」下的测试用例。
    *
-   * ⚠⚠ 这是**共用表**(rdm_testcase),删除不区分来源 —— 只要求例关联的故事号在这次
-   *   文档里,就会把同步任务写的那条也一起删。故 story_keys 必须由校验阶段解析出的
+   * ⚠⚠ 删除**不区分来源**(rdm_testcase 未设来源列)—— 只要求例关联的故事号在这次
+   *   文档里,表里对应的行都会被删。故 story_keys 必须由校验阶段解析出的
    *   故事号填充,后端也拒绝空数组(空范围 = 整个项目会被清空)。
    */
   clearTestcases(

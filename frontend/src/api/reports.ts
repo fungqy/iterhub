@@ -281,7 +281,7 @@ export interface SprintSummary {
   avg_bug_test_seconds: number
   avg_bug_finish_seconds: number
 
-  /** 归属本 Sprint 的用例数(用例「测试要点」引用的故事 ∩ 本 Sprint 故事,按 case_id 去重) */
+  /** 归属本 Sprint 的用例数(用例引用的故事 ∩ 本 Sprint 故事,按 case_id 去重) */
   case_count: number
   /** 用例数 / 故事数;故事数为 0 时无分母 → null */
   case_per_story: number | null

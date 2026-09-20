@@ -79,8 +79,8 @@ export const TH = {  // ── 通用：多张表共用，因此只有一份 ─
   // ── 文档测试用例导入 ─────────────────────────────────────────────
   // ⚠ 这 4 个 key 是 2026-09-18 新增的，各自都不是已有概念的别名：
   //   · storyKey（故事号）—— 用例与故事的关联（源文档的「需求」列）；
-  //   · execStatus（执行状态）—— 同步侧来自 customfield_11107，与 status 的「待办」不是同物；
-  //   · caseSet（用例集）—— 落库在 rdm_testcase.module（customfield_11102），源文档的「测试用例集」列；
+  //   · execStatus（执行状态）—— 来自源文档的「最新结果/执行状态」列，与 status 的「待办」不是同物；
+  //   · caseSet（用例集）—— 落库在 rdm_testcase.module，源文档的「测试用例集」列；
   //   · stepCount（步骤数）—— 用例折行后实际入 steps JSON 的步骤条数。
   storyKey: '故事号',
   execStatus: '执行状态',

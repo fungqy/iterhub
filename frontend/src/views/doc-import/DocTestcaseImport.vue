@@ -239,8 +239,8 @@ function handleClear() {
   confirm.require({
     message:
       `将删除本次文档涉及的 ${n} 个故事号下的 ${existingTotal.value} 条测试用例，是否继续？\n`
-      + '注意：该表与 RDM 同步任务共用，只要用例关联的故事号在本次文档里，'
-      + '就会连同同步写入的那条一起删除（表里没有来源列可区分）。',
+      + '注意：只要用例关联的故事号在本次文档里，'
+      + '表里这些用例（含此前导入的）都会被一并删除。',
     header: '确认删除',
     icon: 'pi pi-exclamation-triangle',
     acceptLabel: '确认删除',
@@ -481,7 +481,6 @@ watch(() => props.visible, (val) => {
           <template v-else-if="existingTotal > 0">
             <Message severity="warn" :closable="false">
               本次文档涉及的 {{ storyKeys.length }} 个故事号下已有 <b>{{ existingTotal }}</b> 条测试用例。
-              这张表与 <b>RDM 同步任务共用</b>，清单里既有文档导入的、也有同步写入的。
               直接导入不会清空它们，只会按「用例 + 故事」覆盖同一条。
             </Message>
             <DataTable :value="existingData" :loading="loadingData" class="ds-table">
