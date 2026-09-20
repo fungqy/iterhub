@@ -20,13 +20,12 @@ const showDocTestcaseImport = ref(false)
     <Card class="ds-card">
       <template #content>
         <div class="flex flex-col gap-4 items-start">
-          <Button label="开始导入" icon="pi pi-upload" @click="showDocBugImport = true" />
+          <Button label="故障导入" icon="pi pi-upload" @click="showDocBugImport = true" />
           <!-- 测试用例导入与故障导入并列:两者源头都是「文档」,但口径完全不同 ——
                故障的迭代归属在表内 sprint 列,用例的归属要用户自己选迭代。 -->
           <Button
-            label="导入文档测试用例"
+            label="用例导入"
             icon="pi pi-list-check"
-            severity="secondary"
             @click="showDocTestcaseImport = true"
           />
         </div>
