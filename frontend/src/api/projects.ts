@@ -1,38 +1,11 @@
 import { get, post, put, del } from './index'
-import type { ProjectOption, SprintOption, SprintMetrics } from './types'
+import type { SprintOption } from './types'
 
+// ⚠ 报告类接口的**实现与类型统一收敛在 @/api/reports**,本模块不再重复定义
+//   (历史上这里另有一份 BugDetailResponse / BugListItem / ReopenBugItem 与
+//    getBugList,签名还与 reports.ts 的参数顺序相反,属于随时会踩的坑)。
+//   这里只保留 re-export,避免打断既有 `from '@/api/projects'` 的引用。
 export type { ProjectOption, SprintOption, SprintMetrics } from './types'
-
-export interface BugDetailResponse {
-  developers: { developer: string; total: number }[]
-  priorities: string[]
-  tags: string[]
-  data: Record<string, Record<string, Record<string, number>>>
-}
-
-export interface BugListItem {
-  index: number
-  issue_key: string
-  developer: string
-  priority: string
-  issue_name: string
-  reason_analysis: string
-  is_typical: string
-  source: string
-  tag: string
-}
-
-export interface ReopenBugItem {
-  index: number
-  issue_key: string
-  issue_name: string
-  bug_maker: string
-  reporter: string
-  bug_type: string
-  priority: string
-  bug_reason: string
-  resolution: string
-}
 
 export interface ReminderSettings {
   need_story_remind: boolean
@@ -99,6 +72,17 @@ export const projectApi = {
     return get<ProjectConfig[]>('/projects')
   },
 
+  /**
+   * 单个项目详情。
+   *
+   * ⚠ 编辑表单必须走这里而不是复用列表行:列表接口对 robot_key 做了脱敏,
+   *   拿列表值填表单再保存会把掩码写回库,真实 webhook key 被覆盖。
+   *   详情接口返回明文(含 jira_token),供表单回显。
+   */
+  getById(id: number): Promise<ProjectConfig> {
+    return get<ProjectConfig>(`/projects/${id}`)
+  },
+
   create(data: ProjectPayload): Promise<ProjectConfig> {
     return post<ProjectConfig>('/projects', data)
   },
@@ -112,39 +96,20 @@ export const projectApi = {
   },
 }
 
-export const reportsApi = {
-  getProjects(): Promise<ProjectOption[]> {
-    return get<ProjectOption[]>('/reports/projects')
-  },
-
+/**
+ * RDM **实时**迭代列表(作业页「手动执行」弹窗的 Sprint 下拉数据源)。
+ *
+ * ⚠ 与 `@/api/reports` 的 `reportsApi.getSprints` **同名但不同源**,别混用:
+ *   - 本模块(这里):`GET /reports/sprints/{id}` —— 直连 RDM 实时拉取,
+ *     拉取成功还会全量重写本地 `rdm_sprint`(见后端 reports.py 该端点的副作用说明);
+ *     好处是新迭代**首次同步前**也能选到。
+ *   - `@/api/reports`: `GET /reports/db-sprints/{id}` —— 只读本地库,不碰 RDM。
+ *
+ * ⚠ 导出名刻意**不叫** `reportsApi`:同名导出会让编辑器的自动导入选错文件,
+ *   而两者一旦选错就是「静默换了数据源」而不是编译报错。
+ */
+export const sprintApi = {
   getSprints(projectId: number): Promise<SprintOption[]> {
     return get<SprintOption[]>(`/reports/sprints/${projectId}`)
-  },
-
-  getMetrics(sprintId: number): Promise<SprintMetrics> {
-    return get<SprintMetrics>('/reports/metrics', { sprint_id: sprintId })
-  },
-
-  getBugDetails(sprintId: number): Promise<BugDetailResponse> {
-    return get<BugDetailResponse>('/reports/bugs/detail', { sprint_id: sprintId })
-  },
-
-  getBugList(sprintId: number, priority: string, tag: string, developer?: string): Promise<BugListItem[]> {
-    return get<BugListItem[]>('/reports/bugs/list', {
-      sprint_id: sprintId,
-      developer: developer || '',
-      priority,
-      tag,
-    })
-  },
-
-  getBugAvgTime(sprintId: number): Promise<{ avg_dev_seconds: number; avg_test_seconds: number }> {
-    return get<{ avg_dev_seconds: number; avg_test_seconds: number }>('/reports/bugs/avg-time', {
-      sprint_id: sprintId,
-    })
-  },
-
-  getReopenBugs(sprintId: number): Promise<ReopenBugItem[]> {
-    return get<ReopenBugItem[]>('/reports/bugs/reopen', { sprint_id: sprintId })
   },
 }

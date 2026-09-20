@@ -1,4 +1,5 @@
 import logging
+import os
 from contextlib import contextmanager
 
 import bcrypt
@@ -75,21 +76,38 @@ def init_database():
     Base.metadata.create_all(engine)
 
 
+# 默认管理员口令的环境变量名。注册接口已下线,该口令是系统唯一的初始登录入口。
+_ADMIN_PASSWORD_ENV = "ADMIN_PASSWORD"
+
+
 def create_default_user():
     """创建默认登录账号（如果不存在）。
 
     已取消用户身份/管理员概念:所有登录用户共享全部数据与功能,故这里只保证
     系统始终有一个可登录的账号,不再设置任何角色标记。
+
+    口令来源:`ADMIN_PASSWORD` 环境变量。
+    - 账号已存在:不覆盖口令,直接返回(改口令请走数据库/运维流程)
+    - 账号不存在且未设置该变量:**抛错拒绝启动**。注册接口已下线,
+      此时系统将无人可登录;静默跳过只会把问题推迟到「登录不进去」才暴露
     """
     from db.models import User
 
     with get_session() as session:
         user = session.query(User).filter(User.username == "admin").first()
-        if not user:
-            # 只有用户不存在时才创建
-            user = User(username="admin", password=get_password_hash("admin123"))
-            session.add(user)
-            session.commit()
-            logger.info("默认账号已创建: admin / admin123")
-        else:
+        if user:
             logger.info("默认账号已存在")
+            return
+
+        password = os.getenv(_ADMIN_PASSWORD_ENV)
+        if not password:
+            raise RuntimeError(
+                "admin 账号不存在且未设置环境变量 "
+                f"{_ADMIN_PASSWORD_ENV},系统将无人可登录。"
+                "请在 backend/.env 中设置一个强口令(建议 ≥16 位随机串)后重启。"
+            )
+
+        session.add(User(username="admin", password=get_password_hash(password)))
+        session.commit()
+        # 口令绝不写日志
+        logger.info("默认账号 admin 已创建(口令取自环境变量 %s)", _ADMIN_PASSWORD_ENV)

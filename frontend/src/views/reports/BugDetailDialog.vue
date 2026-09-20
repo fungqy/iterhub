@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onUnmounted } from 'vue'
 import { reportsApi, type BugDetailResponse, type BugListItem } from '@/api/reports'
 import { useNotify } from '@/utils/notify'
 import { useSprintScope } from '@/composables/useSprintScope'
@@ -186,6 +186,13 @@ watch(() => props.visible, (val) => {
   } else {
     onBugDialogClose()
   }
+})
+
+// ⚠ 组件在「可见状态下被卸载」(切路由 / 父组件销毁) 时,visible 的 watch 不会再触发,
+//   监听器会留在 window 上继续持有本组件 —— 既是内存泄漏,也会在销毁后对被卸载的
+//   组件回调。onBugDialogClose 只会由 watch 触发,覆盖不到这条路径。
+onUnmounted(() => {
+  window.removeEventListener('resize', handleChartsResize)
 })
 </script>
 

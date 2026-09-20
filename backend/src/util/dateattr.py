@@ -1,13 +1,24 @@
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 
 from src.holiday import check_isworkday as _check_workday
 
 
 class DateAttr:
-    """日期相关工具类"""
+    """日期相关工具类
+
+    ⚠ 传 None 时「今天」在**每次取用时**解析,而不是构造时定格。
+    任务模块在 import 期就 new 了实例(`dateattr = DateAttr()`),若构造时定格,
+    常驻进程跨周后 firstday_of_week / lastday_of_week 会一直停在启动那一周,
+    「本周待完成 / 本周扫描」的判定随之错一整个周期。
+    """
 
     def __init__(self, dt: date | datetime | None = None) -> None:
-        self._date = dt or date.today()
+        self._dt = dt
+
+    @property
+    def _date(self):
+        # 惰性解析:未显式指定日期时,始终取「当下」的今天
+        return self._dt or date.today()
 
     @property
     def weekday(self):
@@ -26,44 +37,23 @@ class DateAttr:
         return _check_workday(self._date)
 
     @staticmethod
-    def firstdayofweek(d=date.today()):
+    def firstdayofweek(d: date | None = None):
+        # ⚠ 不能用 d=date.today() 作默认值:默认参数在 import 期求值,会永久定格
+        d = d or date.today()
         return d - timedelta(days=d.weekday())
 
     @staticmethod
-    def lastdayofweek(d=date.today()):
+    def lastdayofweek(d: date | None = None):
+        d = d or date.today()
         days_to_go = 6 - d.weekday()
         if days_to_go < 0:
             days_to_go += 7
         return d + timedelta(days=days_to_go)
 
-    @staticmethod
-    def remove_timezone(datetime_str):
-        """ ""移除时间中的时区信息"""
-        """if not datetime_str:
-            return datetime_str"""
-        return datetime.strptime(datetime_str, "%Y-%m-%dT%H:%M:%S.%f%z").strftime(
-            "%Y-%m-%dT%H:%M:%S.%f"
-        )[:-3]
-
-    @staticmethod
-    def convert_timezone(datetime_str):
-        """将UTC+0时区转换为UTC+8时区"""
-        return datetime.strptime(datetime_str[0:19], "%Y-%m-%dT%H:%M:%S") + timedelta(
-            hours=8
-        )
-
-    @staticmethod
-    def to_beijing_mysql_datetime(iso_str: str) -> str:
-        # 修正时区格式（+0800 -> +08:00）
-        if "+" in iso_str and ":" not in iso_str[-5:]:
-            iso_str = f"{iso_str[:-2]}:{iso_str[-2:]}"
-
-        dt = datetime.fromisoformat(
-            iso_str
-        )  # 此时格式为 "2025-02-28T14:40:58.000+08:00"
-        beijing_tz = timezone(timedelta(hours=8))
-        beijing_time = dt.astimezone(beijing_tz)
-        return beijing_time.strftime("%Y-%m-%d %H:%M:%S")
+    # 注:原 remove_timezone / convert_timezone / to_beijing_mysql_datetime 三个静态方法
+    # 全仓无调用方,且最后一个与 util/jira.py 的 to_beijing_mysql_datetime 是同一逻辑的
+    # 两份实现(jira 那份还额外支持 datetime 入参)—— 已于 2026-09-20 删除,
+    # 时间归一统一走 util/jira.py 与 api/services/execution_log.to_naive_beijing。
 
 
 if __name__ == "__main__":

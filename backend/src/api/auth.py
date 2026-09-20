@@ -115,7 +115,11 @@ def get_current_user_flexible(
 
 
 def get_current_user(token: str):
-    """从token获取当前用户信息(非依赖版本,供脚本/测试使用)"""
+    """从token获取当前用户信息(非依赖版本)。
+
+    当前无调用方;保留是因为它比两个 Depends 版本更容易在脚本/调试中直接使用。
+    若确认长期无人使用,可直接删除。
+    """
     payload = decode_access_token(token)
     if not payload:
         return None

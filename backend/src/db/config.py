@@ -1,7 +1,7 @@
 """数据库连接映射（单变量 MSQL_DSN）
 
 后端数据库连接统一收敛为单个环境变量 MSQL_DSN，格式为完整 SQLAlchemy URL，
-例如: mysql+pymysql://iteruser:iterpass123@localhost:3306/iterdb
+例如: mysql+pymysql://your_user:your_password@localhost:3306/iterdb
 
 - get_dsn(): 返回原始 DSN 字符串，可直接交给 create_engine 使用。
 - get_db_config(): 解析为 {host, port, user, password, database} 字典，供 pymysql.connect 使用。

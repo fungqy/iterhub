@@ -7,7 +7,11 @@ from sqlalchemy import text
 from api.auth import get_current_user_from_header
 from api.services.sprint_filter import exclude_sql, excluded_sprint_ids
 from db.database import get_session
-from util.jira import BaseProject
+from util.jira import (
+    INTERACTIVE_SPRINT_RETRIES,
+    INTERACTIVE_SPRINT_TIMEOUT,
+    BaseProject,
+)
 
 router = APIRouter(prefix="/api/reports", tags=["质量报表"])
 
@@ -169,7 +173,19 @@ async def list_project_sprints(
     current_user: dict = Depends(get_current_user_from_header)
 ):
     """根据项目ID实时从 RDM 获取 Sprint 列表（不再依赖本地 rdm_sprint 表）；
-    RDM 拉取失败或缺少 JIRA 认证时，回退返回数据库中的存量数据"""
+    RDM 拉取失败或缺少 JIRA 认证时，回退返回数据库中的存量数据
+
+    ⚠⚠ **本接口是「读」却带「写」副作用**(2026-09-20 评审后确认暂时保留):
+    RDM 拉取成功时会 `DELETE FROM rdm_sprint WHERE project_id=?` 再全量重写。
+    由此带来两个必须知道的后果,改动本接口前先读:
+      1. 它与 task/report_rdm_data.process_sprint(按 sprint 写 rdm_sprint)并发时
+         会互相覆盖/删行 —— 后者提交的 sprint 可能被本接口的「全量覆盖」抹掉;
+      2. 作业页手动执行弹窗打开即会触发它,即「只是打开下拉框」也会写库。
+    彻底修法是拆成显式的「同步迭代列表」写接口 + 纯只读查询接口(需前端配合),
+    本轮按决策不动,仅在此标注。
+
+    另:探测 RDM 用的是收窄过的超时(见 _RDM_SPRINT_PROBE_TIMEOUT),到点即回退本地库;
+    否则本接口是同步阻塞的,下拉会长时间拿不到 options。"""
     from api.services.project_configs import get_jira_auth
     from util.jira import ProjectUtil
 
@@ -191,7 +207,13 @@ async def list_project_sprints(
         project_id=str(jira_project_id),
         project_name=project_name or "",
     )
-    project_util = ProjectUtil(config, auth_config)
+    # 交互式只读端点:探测 RDM 用短超时,到点即回退本地 rdm_sprint(见 util.jira 常量)
+    project_util = ProjectUtil(
+        config,
+        auth_config,
+        sprint_timeout=INTERACTIVE_SPRINT_TIMEOUT,
+        sprint_retries=INTERACTIVE_SPRINT_RETRIES,
+    )
 
     try:
         sprints = project_util.sprints or []

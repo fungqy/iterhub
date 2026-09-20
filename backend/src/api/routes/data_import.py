@@ -31,6 +31,7 @@ from api.services.doc_bug_images import has_drawing, iter_doc_bug_image_rows
 from api.services.execution_log import now_beijing
 from api.services.sprint_filter import exclude_sql
 from db.database import get_session
+from util.errors import classify_error
 
 logger = logging.getLogger(__name__)
 
@@ -395,7 +396,7 @@ async def clear_doc_bugs(
             return {"deleted": result.rowcount}   # type: ignore[attr-defined]
         except Exception as e:
             session.rollback()
-            raise HTTPException(status_code=500, detail=f"清除数据失败: {e!s}")
+            raise HTTPException(status_code=500, detail=f"清除数据失败: {classify_error(e)[1]}")
 
 
 @router.get("/doc-bug-images")
@@ -1263,7 +1264,7 @@ def upload_doc_bugs(
                 detail=f"文件不是有效的 .xlsx（老版 .xls 请先另存为 .xlsx）: {e!s}",
             )
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"处理文件失败: {e!s}")
+            raise HTTPException(status_code=500, detail=f"处理文件失败: {classify_error(e)[1]}")
 
         if not data_rows:
             raise HTTPException(status_code=400, detail="Excel 文件中没有有效数据行")
@@ -1310,7 +1311,7 @@ def upload_doc_bugs(
                 session.commit()
             except Exception as e:
                 session.rollback()
-                raise HTTPException(status_code=500, detail=f"导入数据失败: {e!s}")
+                raise HTTPException(status_code=500, detail=f"导入数据失败: {classify_error(e)[1]}")
 
             # 业务行已落库,再补截图(失败只上报,不回滚上面这 43 行,见 _sync_doc_bug_images)
             # sheet_name 原样转交:文本与截图必须读**同一张** sheet(见 read_doc_bug_sheet 的说明)
@@ -1339,7 +1340,7 @@ def upload_doc_bugs(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"处理文件失败: {e!s}")
+        raise HTTPException(status_code=500, detail=f"处理文件失败: {classify_error(e)[1]}")
     finally:
         if tmp_path:
             try:
@@ -1408,7 +1409,7 @@ def validate_doc_bugs(
                 detail=f"文件不是有效的 .xlsx（老版 .xls 请先另存为 .xlsx）: {e!s}",
             )
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"处理文件失败: {e!s}")
+            raise HTTPException(status_code=500, detail=f"处理文件失败: {classify_error(e)[1]}")
 
         if not data_rows:
             raise HTTPException(status_code=400, detail="Excel 文件中没有有效数据行")
@@ -1458,7 +1459,7 @@ def validate_doc_bugs(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"处理文件失败: {e!s}")
+        raise HTTPException(status_code=500, detail=f"处理文件失败: {classify_error(e)[1]}")
     finally:
         if tmp_path:
             try:
@@ -2013,7 +2014,7 @@ def validate_testcases(
         except HTTPException:
             raise
         except Exception as e:  # noqa: BLE001
-            raise HTTPException(status_code=500, detail=f"处理文件失败: {e!s}")
+            raise HTTPException(status_code=500, detail=f"处理文件失败: {classify_error(e)[1]}")
 
         if not data_rows:
             raise HTTPException(status_code=400, detail="CSV 文件中没有有效数据行")
@@ -2030,7 +2031,7 @@ def validate_testcases(
     except HTTPException:
         raise
     except Exception as e:  # noqa: BLE001
-        raise HTTPException(status_code=500, detail=f"处理文件失败: {e!s}")
+        raise HTTPException(status_code=500, detail=f"处理文件失败: {classify_error(e)[1]}")
     finally:
         if tmp_path:
             try:
@@ -2081,7 +2082,7 @@ async def clear_testcases(
             return {"deleted": result.rowcount, "story_count": len(story_keys)}   # type: ignore[attr-defined]
         except Exception as e:
             session.rollback()
-            raise HTTPException(status_code=500, detail=f"清除数据失败: {e!s}")
+            raise HTTPException(status_code=500, detail=f"清除数据失败: {classify_error(e)[1]}")
 
 
 TESTCASE_SELECT_COLUMNS = """
@@ -2210,7 +2211,7 @@ def upload_testcases(
         except HTTPException:
             raise
         except Exception as e:  # noqa: BLE001
-            raise HTTPException(status_code=500, detail=f"处理文件失败: {e!s}")
+            raise HTTPException(status_code=500, detail=f"处理文件失败: {classify_error(e)[1]}")
 
         if not data_rows:
             raise HTTPException(status_code=400, detail="CSV 文件中没有有效数据行")
@@ -2242,14 +2243,14 @@ def upload_testcases(
                 session.commit()
             except Exception as e:  # noqa: BLE001
                 session.rollback()
-                raise HTTPException(status_code=500, detail=f"导入数据失败: {e!s}")
+                raise HTTPException(status_code=500, detail=f"导入数据失败: {classify_error(e)[1]}")
 
         return {**report, "imported": len(evaluated["rows"])}
 
     except HTTPException:
         raise
     except Exception as e:  # noqa: BLE001
-        raise HTTPException(status_code=500, detail=f"处理文件失败: {e!s}")
+        raise HTTPException(status_code=500, detail=f"处理文件失败: {classify_error(e)[1]}")
     finally:
         if tmp_path:
             try:

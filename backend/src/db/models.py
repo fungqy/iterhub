@@ -11,6 +11,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, declarative_base, mapped_column, relationship
 
+from util.qywx import mask_key
+
 Base = declarative_base()
 
 
@@ -110,7 +112,14 @@ class ProjectConfig(Base):
         cascade="all, delete-orphan",
     )
 
-    def to_dict(self, include_token=False):
+    def to_dict(self, include_token=False, mask_robot_key=True):
+        """序列化项目配置。
+
+        :param include_token: 是否返回 JIRA token 明文
+        :param mask_robot_key: 是否对企微 robot_key 脱敏。列表接口保持默认 True
+            (webhook key 属凭据,不应在列表里广而告之);详情接口传 False,
+            因为编辑表单需要真实值回显 —— 回显掩码会在保存时把掩码写回库里
+        """
         data = {
             "id": self.id,
             "board_id": self.board_id,
@@ -120,7 +129,11 @@ class ProjectConfig(Base):
             "gitlab_group_key": self.gitlab_group_key,
             "sonar_key_prefix": self.sonar_key_prefix,
             "sonar_scan_remind_default_person": self.sonar_scan_remind_default_person,
-            "robot_key": self.robot_key,
+            "robot_key": (
+                (mask_key(self.robot_key) if self.robot_key else "")
+                if mask_robot_key
+                else self.robot_key
+            ),
             "jira_auth_config_id": self.jira_auth_config_id,
             "created_at": self.created_at.isoformat()
             if self.created_at is not None

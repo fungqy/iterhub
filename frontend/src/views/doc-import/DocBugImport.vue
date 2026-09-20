@@ -222,6 +222,8 @@ async function loadProjects() {
   loadingProjects.value = true
   try {
     projects.value = await reportsApi.getProjects()
+  } catch {
+    // 失败提示由 axios 拦截器统一给出;下拉保持为空,不留半截数据
   } finally {
     loadingProjects.value = false
   }
@@ -255,6 +257,8 @@ async function loadSprints() {
       // 迭代名缺失时回落到 id,免得下拉里是一行空白、点下去还不知道选了啥
       sprint_name: s.sprint_name || `#${s.sprint_id}`,
     }))
+  } catch {
+    // 失败提示由 axios 拦截器统一给出;迭代下拉保持清空,不留半截数据
   } finally {
     loadingSprints.value = false
   }
@@ -289,6 +293,8 @@ async function loadExistingData() {
     )
     existingData.value = res.items
     existingTotal.value = res.total
+  } catch {
+    // 失败提示由 axios 拦截器统一给出;列表保持上一次的结论,不误报为「没有数据」
   } finally {
     loadingData.value = false
   }
@@ -309,15 +315,20 @@ function handleReimport() {
     acceptLabel: '确认',
     rejectLabel: '取消',
     accept: async () => {
-      const res = await dataImportApi.clearDocBugs(
-        selectedJiraProjectId.value,
-        selectedSprintId.value
-      )
-      notify('success', `已清空 ${res.deleted} 条`)
-      existingData.value = []
-      existingTotal.value = 0
-      currentPage.value = 1
-      importResult.value = null
+      try {
+        const res = await dataImportApi.clearDocBugs(
+          selectedJiraProjectId.value,
+          selectedSprintId.value
+        )
+        notify('success', `已清空 ${res.deleted} 条`)
+        existingData.value = []
+        existingTotal.value = 0
+        currentPage.value = 1
+        importResult.value = null
+      } catch {
+        // ⚠ confirm 的 accept 回调抛错没有任何组件会接住,会变成未处理的 rejection。
+        //   失败提示由 axios 拦截器统一给出,这里吞掉即可。
+      }
     },
   })
 }
@@ -374,6 +385,8 @@ async function runValidate() {
     } else {
       notify('warn', '校验未通过，请查看下方原因')
     }
+  } catch {
+    // 失败提示由 axios 拦截器统一给出(校验结论保持为空,不会留下「半份报告」)
   } finally {
     validating.value = false
   }
@@ -400,6 +413,8 @@ async function runImport() {
       // (页面上必须与「成功」有肉眼可辨的区别,不能只靠用户读数字)。
       notify('error', '没有导入任何数据，请查看下方原因')
     }
+  } catch {
+    // 失败提示由 axios 拦截器统一给出;导入结论留空,由用户重试
   } finally {
     uploading.value = false
   }

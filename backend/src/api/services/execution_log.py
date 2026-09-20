@@ -21,6 +21,19 @@ def now_beijing() -> datetime:
     return datetime.now(BEIJING_TZ)
 
 
+def to_naive_beijing(dt: datetime) -> datetime:
+    """把时间归一到「北京时间 naive」。
+
+    ⚠ 库里 DATETIME 列不带时区:直接写 aware 值,最终存进去的是哪个墙钟,
+    取决于驱动是否隐式丢 tzinfo —— 语义不确定。显式转换后,「写入」与
+    「按日期过滤」两端都确定为北京时间墙钟。
+    已是 naive 的值原样返回(调用方已按北京时间给出)。
+    """
+    if dt.tzinfo is None:
+        return dt
+    return dt.astimezone(BEIJING_TZ).replace(tzinfo=None)
+
+
 def record_execution(
     project_config_id: int,
     task_type: str,
@@ -38,8 +51,8 @@ def record_execution(
             log = TaskExecutionLog(
                 project_config_id=project_config_id,
                 task_type=task_type,
-                scheduled_time=scheduled_time,
-                executed_at=now_beijing(),
+                scheduled_time=to_naive_beijing(scheduled_time),
+                executed_at=to_naive_beijing(now_beijing()),
                 status=status,
                 error_message=error_message,
                 task_exec_type=task_exec_type,
@@ -67,7 +80,7 @@ def update_execution(log_id: int, status: str, error_message: str = "") -> None:
                 return
             log.status = status
             log.error_message = error_message
-            log.executed_at = now_beijing()
+            log.executed_at = to_naive_beijing(now_beijing())
             session.commit()
         except Exception as e:
             session.rollback()

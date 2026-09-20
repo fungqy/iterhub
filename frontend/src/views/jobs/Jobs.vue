@@ -36,6 +36,8 @@ async function loadLogs() {
     })
     logs.value = res.items
     total.value = res.total
+  } catch {
+    // 失败提示由 axios 拦截器统一给出;这里只保证 loading 复位
   } finally {
     loading.value = false
   }

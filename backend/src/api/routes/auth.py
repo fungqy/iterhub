@@ -5,7 +5,7 @@ from api.auth import (
     create_access_token,
     get_current_user_from_header,
 )
-from db.database import get_password_hash, get_session, verify_password
+from db.database import get_session, verify_password
 from db.models import User
 from util.ratelimit import login_limiter
 
@@ -26,11 +26,6 @@ class LoginResponse(BaseModel):
 class UserResponse(BaseModel):
     id: int
     username: str
-
-
-class RegisterRequest(BaseModel):
-    username: str
-    password: str
 
 
 @router.post("/login", response_model=LoginResponse)
@@ -70,36 +65,10 @@ async def login(request: Request, body: LoginRequest):
         return LoginResponse(access_token=access_token, user=user.to_dict())
 
 
-
-@router.post("/register", response_model=LoginResponse)
-async def register(request: RegisterRequest):
-    """用户注册(账号仅用于登录识别,不再承载任何业务数据归属)"""
-    with get_session() as session:
-        # 检查用户名是否已存在
-        existing_user = (
-            session.query(User).filter(User.username == request.username).first()
-        )
-        if existing_user:
-            raise HTTPException(status_code=400, detail="用户名已存在")
-
-        # 创建新用户(用户只用于登录)
-        new_user = User(
-            username=request.username,
-            password=get_password_hash(request.password),
-        )
-        session.add(new_user)
-        session.commit()
-        session.refresh(new_user)
-
-        # 创建 token
-        token_data = {
-            "sub": str(new_user.id),
-            "username": new_user.username,
-        }
-        access_token = create_access_token(token_data)
-
-        return LoginResponse(access_token=access_token, user=new_user.to_dict())
-
+# ⚠ 自助注册接口已下线(安全基线收紧):账号只能由初始化/运维流程创建。
+#   本系统没有角色模型 —— 任何登录用户都能读写全部项目配置,
+#   因此「开放注册」实质等于「把全部数据开放给匿名者」。
+#   若将来要重新开放,必须同时补:口令强度校验 + 服务端限流 + 角色划分。
 
 
 @router.get("/me", response_model=UserResponse)

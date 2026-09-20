@@ -1,3 +1,4 @@
+import logging
 import re
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -7,10 +8,19 @@ from api.auth import get_current_user_from_header
 from db.database import get_session
 from db.models import ProjectConfig, ProjectReminderSettings
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/api/projects", tags=["项目配置"])
 
 
 _HHMM_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+# 列表接口对 robot_key 的掩码形态(见 db/models.py 的 mask_robot_key)
+_MASKED_SECRET_RE = re.compile(r"^.{4}\*{4}.{4}$")
+
+
+def _looks_masked(value) -> bool:
+    """判断值是否形如列表接口吐出的掩码(如 abcd****wxyz)。"""
+    return isinstance(value, str) and bool(_MASKED_SECRET_RE.match(value))
 
 
 def _validate_hhmm(value: str | None) -> str | None:
@@ -122,7 +132,8 @@ async def get_project(
         if not project:
             raise HTTPException(status_code=404, detail="项目不存在")
 
-        return project.to_dict(include_token=True)
+        # 详情接口返回 robot_key 明文:编辑表单需要真实值回显(见 to_dict 的说明)
+        return project.to_dict(include_token=True, mask_robot_key=False)
 
 
 @router.post("", response_model=ProjectConfigResponse)
@@ -217,6 +228,13 @@ async def update_project(
 
         for key, value in update_data.items():
             if key == "reminder_settings":
+                continue
+            # 防御:列表接口对 robot_key 脱敏,若调用方把掩码原样回传,绝不能写进库
+            # (否则真实 webhook key 会被 "abcd****wxyz" 覆盖,企微推送直接失效)
+            if key == "robot_key" and _looks_masked(value):
+                logger.warning(
+                    "忽略疑似脱敏值的 robot_key 更新: project_id=%s", project_id
+                )
                 continue
             if hasattr(project, key):
                 setattr(project, key, value)

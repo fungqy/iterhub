@@ -44,7 +44,22 @@ export interface ManualExecuteRequest {
 
 export interface ManualReportDataRequest {
     project_config_id: number;
+    /** 一次可入队多个 Sprint;后端按顺序排队执行(见 scheduler.py 的说明) */
+    sprint_ids: string[];
+}
+
+/** 未入队的 Sprint 及原因(已在执行 / RDM 未找到) */
+export interface ManualReportDataSkipped {
     sprint_id: string;
+    reason: string;
+}
+
+export interface ManualReportDataResponse {
+    status: string;
+    /** 真正入队的 Sprint —— 轮询只盯这些,被跳过的不会产生状态 */
+    task_ids: string[];
+    skipped: ManualReportDataSkipped[];
+    message: string;
 }
 
 export interface ReportDataStatusResponse {
@@ -100,14 +115,22 @@ export const jobApi = {
         return post("/scheduler/manual/sonar-reminder", data)
     },
 
-    checkReportDataExists(projectConfigId: number, sprintId: string) {
-        return get<{ exists: boolean }>(
-            `/scheduler/manual/report-data/check/${projectConfigId}/${sprintId}`
+    /**
+     * 批量检查所选 Sprint 是否已有数据。
+     * 返回 `existing` = 命中的 sprint_id 列表;多选时只发一次请求(后端一次 IN 查询)。
+     */
+    checkReportDataExists(sprintIds: string[]) {
+        return post<{ existing: string[] }>(
+            "/scheduler/manual/report-data/check",
+            { sprint_ids: sprintIds }
         )
     },
 
     manualReportData(data: ManualReportDataRequest) {
-        return post("/scheduler/manual/report-data", data)
+        return post<ManualReportDataResponse>(
+            "/scheduler/manual/report-data",
+            data
+        )
     },
 
     getReportDataStatus(sprintId: string) {

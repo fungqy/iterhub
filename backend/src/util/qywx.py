@@ -17,13 +17,13 @@ PUSH_ENABLED = os.getenv("PUSH_ENABLED", "false").strip().lower() in (
 )
 
 
-def _mask_key(robot_key: str) -> str:
-    """对 robot_key 做脱敏，避免日志泄露完整 webhook"""
+def mask_key(robot_key: str) -> str:
+    """对 robot_key 做脱敏(日志与对外接口共用),避免泄露完整 webhook"""
     if not robot_key:
         return "<empty>"
     if len(robot_key) <= 8:
         return "***"
-    return f"{robot_key[:4]}***{robot_key[-4:]}"
+    return f"{robot_key[:4]}****{robot_key[-4:]}"
 
 
 def post(robot_key: str, message: str | None = None) -> None:
@@ -58,7 +58,7 @@ def send_or_log(robot_key: str, message: str | None) -> None:
     else:
         logger.info(
             f"[PUSH_DISABLED] 已生成企微消息（未发送） "
-            f"robot_key={_mask_key(robot_key)} "
+            f"robot_key={mask_key(robot_key)} "
             f"message=\n{message}"
         )
 

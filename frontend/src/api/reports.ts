@@ -312,7 +312,13 @@ export const reportsApi = {
     return get<ProjectOption[]>('/reports/projects')
   },
 
-  // 质量报表专用:仅读数据库存量 Sprint,不触发 RDM 实时拉取
+  /**
+   * 质量报表专用:仅读数据库存量 Sprint(`/reports/db-sprints`),不触发 RDM 实时拉取。
+   *
+   * ⚠ 作业页「手动执行」弹窗的 Sprint 下拉**不用这个** —— 它需要选到本地库还没同步的
+   *   新迭代,走的是 `@/api/projects` 的 `sprintApi.getSprints`(`/reports/sprints`,
+   *   RDM 实时且会回写 rdm_sprint)。两者同名不同源,改动前先确认调用方。
+   */
   getSprints(projectId: number): Promise<SprintOption[]> {
     return get<SprintOption[]>(`/reports/db-sprints/${projectId}`)
   },

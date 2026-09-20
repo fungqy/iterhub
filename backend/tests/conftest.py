@@ -20,6 +20,10 @@ os.environ.setdefault(
     "MSQL_DSN", "mysql+pymysql://test:test@localhost:3306/test_iterdb"
 )
 
+# 注册接口已下线,create_default_user 在缺 ADMIN_PASSWORD 时会拒绝启动。
+# 测试不触发 lifespan,这里仍显式兜底:将来若改用 with TestClient(...) 也不会踩坑。
+os.environ.setdefault("ADMIN_PASSWORD", "test-admin-password")
+
 # 把 src/ 加入 sys.path（与生产代码中 api/scheduler.py、main.py 的写法一致）
 SRC_DIR = Path(__file__).resolve().parent.parent / "src"
 if str(SRC_DIR) not in sys.path:

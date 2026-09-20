@@ -30,7 +30,8 @@ uvicorn src.api.main:app --host 0.0.0.0 --port 8000
 |------|------|------|
 | POST | `/api/auth/login` | 用户登录 |
 | GET | `/api/auth/me` | 获取当前用户信息 |
-| POST | `/api/auth/register` | 注册新用户 |
+
+> 自助注册接口已下线:账号只能由初始化/运维流程创建(初始口令取自 `ADMIN_PASSWORD` 环境变量)。
 
 ### 项目管理
 

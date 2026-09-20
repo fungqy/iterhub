@@ -23,7 +23,9 @@ services:
     ports:
       - "8008:8000"
     environment:
-      - MSQL_DSN=mysql+pymysql://iteruser:iterpass123@10.102.201.187:3306/iterdb
+      # ⚠ 真实 DSN 不落仓库:在仓库根目录 .env 或 shell 环境中提供 MSQL_DSN。
+      #    未提供时 docker compose 会直接报错退出,避免静默回退到弱口令。
+      - MSQL_DSN=${MSQL_DSN:?请设置环境变量 MSQL_DSN（完整 SQLAlchemy URL）}
       - HOST=0.0.0.0
       - PORT=8000
       # 显式写出(与 backend 默认 400MiB 同值):文档故障的唯一数据源实测 283.6MiB,

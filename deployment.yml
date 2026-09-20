@@ -86,8 +86,15 @@ spec:
         ports:
         - containerPort: 8000
         env:
+        # ⚠ 数据库 DSN 不再明文入库,改由 Secret 提供。首次部署需先创建:
+        #     kubectl create secret generic iterhub-secrets \
+        #       --from-literal=MSQL_DSN='mysql+pymysql://<user>:<password>@<host>:3306/<db>'
+        #   更新 Secret 后需 kubectl rollout restart deployment iterhub 生效。
         - name: MSQL_DSN
-          value: "mysql+pymysql://iteruser:iterpass123@10.102.201.187:3306/iterdb"
+          valueFrom:
+            secretKeyRef:
+              name: iterhub-secrets
+              key: MSQL_DSN
         - name: HOST
           value: "0.0.0.0"
         - name: PORT

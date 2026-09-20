@@ -463,11 +463,20 @@ watch(timelinePoints, async () => {
 // 监听挂在 watch(timelineScroller) 上而不是 onMounted:容器是 v-if 渲染的,
 // 首次挂载时它还不存在,且切换项目会让它整体卸载重建。
 let timelineResizeObserver: ResizeObserver | null = null
+// 记录「当前挂了 scroll 监听的那个元素」,便于在元素更替/组件卸载时精确摘除。
+let timelineScrollEl: HTMLElement | null = null
 
 watch(timelineScroller, (el) => {
   timelineResizeObserver?.disconnect()
   timelineResizeObserver = null
+  // ⚠ 只 disconnect observer 是不够的:scroll 监听挂在元素上,元素被 v-if 换掉后
+  //   旧监听仍活着(且随每次切换累积),组件销毁后还会继续回调。
+  if (timelineScrollEl) {
+    timelineScrollEl.removeEventListener('scroll', syncTimelineScrollState)
+    timelineScrollEl = null
+  }
   if (!el) return
+  timelineScrollEl = el
   el.addEventListener('scroll', syncTimelineScrollState, { passive: true })
   timelineResizeObserver = new ResizeObserver(() => {
     void settleTimelineScroll(timelineAtEnd.value)
@@ -475,7 +484,13 @@ watch(timelineScroller, (el) => {
   timelineResizeObserver.observe(el)
 })
 
-onUnmounted(() => timelineResizeObserver?.disconnect())
+onUnmounted(() => {
+  timelineResizeObserver?.disconnect()
+  if (timelineScrollEl) {
+    timelineScrollEl.removeEventListener('scroll', syncTimelineScrollState)
+    timelineScrollEl = null
+  }
+})
 
 // ── 迭代概览:点击时间轴上的点位/名称,展示该 Sprint 的指标卡片 ──
 const summaryDialogVisible = ref(false)

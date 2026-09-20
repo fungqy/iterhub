@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
-import { projectApi } from '@/api/projects'
+import { projectApi, type ProjectConfig } from '@/api/projects'
 import { jobApi, type TodayTask } from '@/api/jobs'
 import Card from 'primevue/card'
 import DataTable from 'primevue/datatable'
@@ -12,7 +12,7 @@ import { TASK_TYPE_LABELS, TASK_TYPE_SEVERITY, taskStatusText, taskStatusSeverit
 import { formatDateTimeShort, formatDateLong } from '@/utils/datetime'
 import { TH } from '@/constants/tableHeaders'
 
-const projects = ref<any[]>([])
+const projects = ref<ProjectConfig[]>([])
 const todayTasks = ref<TodayTask[]>([])
 const loading = ref(false)
 const currentPage = ref(1)
@@ -30,6 +30,8 @@ onMounted(async () => {
     ])
     projects.value = projectsRes
     todayTasks.value = tasksRes
+  } catch {
+    // 失败提示由 axios 拦截器统一给出;这里保证 loading 复位,不产生未处理的 rejection
   } finally {
     loading.value = false
   }

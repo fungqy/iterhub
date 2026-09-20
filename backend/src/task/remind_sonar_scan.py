@@ -111,10 +111,24 @@ def gitlab_get_group_projects(group_key):
     while url:  # 初始URL不为空，后续由分页链接更新
         response = requests.get(url, headers=headers, params=params, timeout=30)
         if response.status_code != 200:
+            # ⚠ 静默 break 会返回**不完整**的项目列表而不自知,必须留下痕迹
+            logger.warning(
+                "获取 GitLab group %s 的项目失败, HTTP %s %s (url=%s),已取 %s 个",
+                group_key,
+                response.status_code,
+                response.reason,
+                url,
+                len(projects),
+            )
             break
 
         projects.extend(response.json())
-        url = response.links.get("next", {}).get("url")  # 获取下一页URL
+        next_url = response.links.get("next", {}).get("url")  # 获取下一页URL
+        # 防御:上游若把 next 指回当前页,会导致死循环
+        if next_url == url:
+            logger.warning("GitLab 分页 next 指回当前页,已中止: %s", url)
+            break
+        url = next_url
     # 过滤名称为release 或 project-doc的项目
     return [
         p
@@ -129,9 +143,22 @@ def gitlab_get_group_projects(group_key):
 
 
 def gitlab_get_project_branches(project_id):
-    """从 GitLab 获取指定项目的所有分支"""
+    """从 GitLab 获取指定项目的所有分支;非 200 返回 [](不再把错误体丢给上游)。
+
+    历史实现直接 `return response.json()`:非 200 时返回的是错误对象(dict),
+    上游按列表遍历会取 `branch["commit"]` 直接 TypeError,把一次 HTTP 故障
+    伪装成解析崩溃。
+    """
     url = f"{GITLAB_URL}/api/v4/projects/{project_id}/repository/branches"
     response = requests.get(url, headers=GITLAB_HEADERS, timeout=30)
+    if response.status_code != 200:
+        logger.warning(
+            "获取 GitLab 项目 %s 的分支失败, HTTP %s %s",
+            project_id,
+            response.status_code,
+            response.reason,
+        )
+        return []
     return response.json()
 
 

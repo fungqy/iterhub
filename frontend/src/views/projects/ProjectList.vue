@@ -142,27 +142,35 @@ function openAddDialog() {
   dialogVisible.value = true
 }
 
-function openEditDialog(row: ProjectConfig) {
+async function openEditDialog(row: ProjectConfig) {
   isEdit.value = true
+  // ⚠ 必须取详情:列表接口对 robot_key 脱敏(且不回吐 jira_token),
+  //   拿列表值填表单再保存会把掩码/空值写回库,真实凭据被覆盖。
+  let detail: ProjectConfig
+  try {
+    detail = await projectApi.getById(row.id)
+  } catch {
+    return // 错误提示由拦截器统一处理
+  }
   formData.value = {
-    id: row.id,
-    board_id: row.board_id,
-    board_name: row.board_name,
-    project_id: row.project_id,
-    project_name: row.project_name,
-    gitlab_group_key: row.gitlab_group_key,
-    sonar_key_prefix: row.sonar_key_prefix,
-    sonar_scan_remind_default_person: row.sonar_scan_remind_default_person,
-    robot_key: row.robot_key,
-    jira_user: row.jira_user,
-    jira_token: row.jira_token ?? '',
-    need_story_remind: row.need_story_remind ?? false,
-    need_task_remind: row.need_task_remind ?? false,
-    need_sonar_scan_remind: row.need_sonar_scan_remind ?? false,
-    need_report_data: row.need_report_data ?? false,
-    story_remind_time: row.reminder_settings?.story_remind_time ?? '',
-    task_remind_time: row.reminder_settings?.task_remind_time ?? '',
-    sonar_remind_time: row.reminder_settings?.sonar_remind_time ?? '',
+    id: detail.id,
+    board_id: detail.board_id,
+    board_name: detail.board_name,
+    project_id: detail.project_id,
+    project_name: detail.project_name,
+    gitlab_group_key: detail.gitlab_group_key,
+    sonar_key_prefix: detail.sonar_key_prefix,
+    sonar_scan_remind_default_person: detail.sonar_scan_remind_default_person,
+    robot_key: detail.robot_key,
+    jira_user: detail.jira_user,
+    jira_token: detail.jira_token ?? '',
+    need_story_remind: detail.need_story_remind ?? false,
+    need_task_remind: detail.need_task_remind ?? false,
+    need_sonar_scan_remind: detail.need_sonar_scan_remind ?? false,
+    need_report_data: detail.need_report_data ?? false,
+    story_remind_time: detail.reminder_settings?.story_remind_time ?? '',
+    task_remind_time: detail.reminder_settings?.task_remind_time ?? '',
+    sonar_remind_time: detail.reminder_settings?.sonar_remind_time ?? '',
   }
   dialogVisible.value = true
 }

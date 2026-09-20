@@ -1,22 +1,22 @@
-"""qywx._mask_key 行为校验"""
+"""qywx.mask_key 行为校验"""
 
-from util.qywx import _mask_key
+from util.qywx import mask_key
 
 
 def test_empty():
-    assert _mask_key("") == "<empty>"
+    assert mask_key("") == "<empty>"
 
 
 def test_short_key_returns_stars():
-    assert _mask_key("abc") == "***"
-    assert _mask_key("12345678") == "***"
+    assert mask_key("abc") == "***"
+    assert mask_key("12345678") == "***"
 
 
 def test_long_key_partial_mask():
     key = "abcd-1234-5678-efgh"
-    masked = _mask_key(key)
+    masked = mask_key(key)
     assert masked.startswith("abcd")
     assert masked.endswith("efgh")
-    assert "***" in masked
+    assert "****" in masked
     # 中间真实字符不应出现在脱敏字符串中
     assert "1234" not in masked

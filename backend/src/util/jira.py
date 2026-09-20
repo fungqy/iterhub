@@ -10,33 +10,64 @@ import requests
 logger = logging.getLogger("Jira")
 
 
+# 交互式路径(页面下拉、手动执行入队校验)拉 Sprint 的短超时。
+#
+# 这两条路径都是「用户在等」的同步请求:RDM 不可达时必须尽快回退本地库 / 报错,
+# 不能沿用默认的 60s × 3 次 + 每轮 2s 退避(那是给后台定时任务用的)。
+# 前端在这段时间里 options 为空,PrimeVue Select 会直接渲染 "No available options"。
+INTERACTIVE_SPRINT_TIMEOUT = 5
+INTERACTIVE_SPRINT_RETRIES = 0
+
+
 def _get_with_retry(
     url: str, headers: dict, *, timeout: int = 60, retries: int = 2
 ) -> requests.Response:
-    """GET 请求 RDM：读超时/网络异常自动重试，重试耗尽后抛出最后一次异常"""
+    """GET 请求 RDM：网络异常、限流(429)、服务端错误(5xx) 自动重试。
+
+    重试耗尽后的行为:
+    - 最后一次是网络类异常 ⇒ 抛出该异常(与既有行为一致)
+    - 最后一次拿到了响应   ⇒ 原样返回,交由调用方按 status_code 分支
+      (ProjectUtil.sprints / active_sprints 就是这么用的,改成抛错会破坏契约)
+    """
     last_exc: Exception | None = None
     for attempt in range(retries + 1):
+        # 每轮重置:避免上一轮的错误响应被当成「最后一次的响应」返回
+        resp: requests.Response | None = None
         try:
-            return requests.get(url, headers=headers, timeout=timeout)
+            resp = requests.get(url, headers=headers, timeout=timeout)
         except requests.exceptions.RequestException as exc:
             last_exc = exc
-            if attempt < retries:
-                logger.warning(
-                    "请求 RDM 失败(%s)，第 %s/%s 次重试: %s",
-                    exc.__class__.__name__,
-                    attempt + 1,
-                    retries,
-                    url,
-                )
-                time.sleep(2)
-    raise last_exc  # type: ignore[misc]
+        else:
+            # 4xx(429 除外)是确定性错误,重试没有意义
+            if resp.status_code != 429 and resp.status_code < 500:
+                return resp
+            last_exc = RuntimeError(f"HTTP {resp.status_code} {resp.reason}")
+
+        if attempt < retries:
+            logger.warning(
+                "请求 RDM 失败(%s)，第 %s/%s 次重试: %s",
+                type(last_exc).__name__,
+                attempt + 1,
+                retries,
+                url,
+            )
+            time.sleep(2)
+            continue
+
+        if resp is not None:
+            return resp
+        assert last_exc is not None
+        raise last_exc
 
 
-def _get_auth_config(session) -> AuthConfig | None:
-    """获取全局共享的JIRA认证配置(与登录用户无关)。
+def get_auth_config_from_session(session) -> AuthConfig | None:
+    """从给定会话读取全局共享的 JIRA 认证配置(与登录用户无关)。
 
     已取消「用户-JIRA认证」绑定:凭据是全体用户共用的业务配置。
     表中通常只有一行;多行时取 id 最小的一行,保证结果稳定。
+
+    ⚠ 全仓唯一的查询实现:`api/services/project_configs.get_jira_auth()` 只是
+    在它外面包了一层「开 session」。别再复制第二份查询 —— 历史上两份副本就漂移过。
     """
     from db.models import JiraAuthConfig
 
@@ -115,7 +146,7 @@ class Sprint:
             if not row:
                 raise ValueError(f"未找到 sprint_id={sprint_id} 的 Sprint 数据")
 
-            auth_config = _get_auth_config(session)
+            auth_config = get_auth_config_from_session(session)
 
             return cls(
                 board_id=str(row.board_id),
@@ -180,8 +211,8 @@ class Sprint:
     def issues(
         self, issue_types: list[str] | None = None, need_changelog: bool = False
     ) -> list[dict]:
-        """
-        通用的获取issues的函数
+        """通用的获取 issues 的函数(按 startAt 分页取全)
+
         :param issue_types: 用于筛选 bug 的 JQL 条件（可选）
         :param need_changelog: 是否需要变更日志
         :return: 返回 issues 或 bugs 的列表
@@ -193,30 +224,36 @@ class Sprint:
         )
         changelog_param = "&expand=changelog" if need_changelog else ""
 
-        search_url = f"{self.api_url}/rest/api/2/search?"
-        jql = f"jql=project={self.project_id} AND sprint={self.sprint_id}{issue_types_param}&startAt={{}}&maxResults={{}}{changelog_param}"
-        # 分页查询初始值
-        _start_at = 0
-        _page_size = 500  # 每次请求的最大结果数
+        search_url = f"{self.api_url}/rest/api/2/search"
+        jql = f"project={self.project_id} AND sprint={self.sprint_id}{issue_types_param}"
+        page_size = 500  # 每次请求的最大结果数
 
-        issues = []
+        issues: list[dict] = []
+        start_at = 0
         while True:
-            # 构造 JQL 查询
-            jql = jql.format(_start_at, _page_size)
-            url = search_url + jql
+            url = (
+                f"{search_url}?jql={jql}&startAt={start_at}"
+                f"&maxResults={page_size}{changelog_param}"
+            )
+            # ⚠ 走统一重试封装;非 200 必须抛错而不是继续循环 ——
+            #   历史实现在非 200 时既不 break 也不推进 startAt,会无限重打同一地址。
+            resp = _get_with_retry(url, self.headers, timeout=30)
+            if resp.status_code != 200:
+                raise RuntimeError(
+                    f"获取 Sprint {self.sprint_id} 的 issue 失败, "
+                    f"HTTP {resp.status_code} {resp.reason} (startAt={start_at})"
+                )
 
-            # 发送请求
-            resp = requests.get(url, headers=self.headers, timeout=30)
-            if resp.status_code == 200:
-                data = resp.json()
-                issues.extend(data["issues"])
+            data = resp.json()
+            page = data.get("issues") or []
+            issues.extend(page)
+            total = data.get("total", len(issues))
 
-                # 如果已经获取了所有结果，则退出循环
-                if len(issues) >= data["total"]:
-                    break
-                else:
-                    # 更新起始位置，继续查询下一页
-                    _start_at += _page_size
+            # 取完即止;page 为空是防御 —— 上游 total 虚高时不能原地死循环
+            if len(issues) >= total or not page:
+                break
+            start_at += page_size
+
         return issues
 
     @property
@@ -267,7 +304,11 @@ class Sprint:
         ]
 
         report_issues = rdm_report_issues(issues)
-        sprint_active_date = to_beijing_mysql_datetime(self.activated_date)
+        # ⚠ 不能再转一次:activated_date 已在 __post_init__ 归一为
+        #   "YYYY-MM-DD HH:MM:SS" 的**北京时间 naive 串**,再过一次
+        #   to_beijing_mysql_datetime 会把它按服务器本地时区重新解释,
+        #   非 +8 时区下整体平移,is_unplaned 判定随之出错(见下方比较)。
+        sprint_active_date = self.activated_date
         for issue in report_issues:
             issue["sprint_id"] = self.sprint_id
             issue["sprint_name"] = self.sprint_name
@@ -333,13 +374,22 @@ class ProjectRemindConfig(BaseProject):
 
 class ProjectUtil:
     def __init__(
-        self, project: BaseProject, auth_config: AuthConfig | None = None
+        self,
+        project: BaseProject,
+        auth_config: AuthConfig | None = None,
+        *,
+        sprint_timeout: int = 60,
+        sprint_retries: int = 2,
     ) -> None:
         self.project = project
         # 优先使用显式传入的 auth_config，其次尝试从 project 上获取（如 ProjectRemindConfig.auth_config）
         if auth_config is None and hasattr(project, "auth_config"):
             auth_config = project.auth_config
         self.auth_config = auth_config
+        # Sprint 列表拉取的超时/重试。默认值与 _get_with_retry 保持一致(交互式路径可调小,
+        # 详见 reports.py 的 /sprints 端点:那里 RDM 不可达时必须尽快回退本地库)。
+        self.sprint_timeout: int = sprint_timeout
+        self.sprint_retries: int = sprint_retries
 
     @property
     def auth(self) -> AuthConfig | None:
@@ -392,7 +442,12 @@ class ProjectUtil:
     @property
     def sprints(self) -> list[Sprint] | None:
         url = f"{self.api_url}/rest/agile/1.0/board/{self.project.board_id}/sprint"
-        response = _get_with_retry(url, self.headers)
+        response = _get_with_retry(
+            url,
+            self.headers,
+            timeout=self.sprint_timeout,
+            retries=self.sprint_retries,
+        )
         sprint_objs = []
         if response.status_code == 200 and response.json()["values"]:
             for sprint in response.json()["values"]:

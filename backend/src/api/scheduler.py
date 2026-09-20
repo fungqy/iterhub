@@ -16,7 +16,7 @@ from apscheduler.triggers.cron import CronTrigger
 
 # 迁移到 api/services 的叶子函数在此做兜底 re-export,
 # 以维持既有 `from api.scheduler import X` 与 `patch("api.scheduler.X")` 路径不破坏。
-from api.services.execution_log import record_execution
+from api.services.execution_log import record_execution, to_naive_beijing
 from api.services.project_configs import get_project_configs
 from util.dateattr import DateAttr
 from util.jira import ProjectRemindConfig
@@ -250,15 +250,20 @@ def get_today_tasks_status():
 
     with get_session() as session:
         today = now_beijing().replace(hour=0, minute=0, second=0, microsecond=0)
-        tomorrow = today.replace(hour=23, minute=59, second=59)
+        # ⚠ 过滤边界必须是 naive 北京时间:TaskExecutionLog.scheduled_time 是无时区列,
+        #   拿 aware 值比较只能靠驱动丢 tzinfo 才「碰巧正确」(见 to_naive_beijing)。
+        day_start = to_naive_beijing(today)
+        day_end = to_naive_beijing(
+            today.replace(hour=23, minute=59, second=59)
+        )
 
         # 获取今日所有执行记录
         logs = (
             session.query(TaskExecutionLog)
             .filter(
                 and_(
-                    TaskExecutionLog.scheduled_time >= today,
-                    TaskExecutionLog.scheduled_time <= tomorrow,
+                    TaskExecutionLog.scheduled_time >= day_start,
+                    TaskExecutionLog.scheduled_time <= day_end,
                 )
             )
             .all()

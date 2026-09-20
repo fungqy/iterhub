@@ -41,8 +41,12 @@ export function tooltipFormatter(params: EChartTooltipParam | EChartTooltipParam
   return html
 }
 
-// RDM 故障详情页地址前缀,拼接故障编码后新开 tab 跳转
-export const RDM_BROWSE_URL = 'http://rdm.zvos.zoomlion.com/browse/'
+// RDM 故障详情页地址前缀,拼接故障编码后新开 tab 跳转。
+// ⚠ 内网地址不写死:不同环境(开发/测试/生产)的 RDM 域名可能不同,
+//   用 VITE_RDM_BROWSE_URL 覆盖;未配置时回落默认内网地址,保持既有行为不变。
+export const RDM_BROWSE_URL =
+  (import.meta.env.VITE_RDM_BROWSE_URL as string | undefined)
+  || 'http://rdm.zvos.zoomlion.com/browse/'
 
 // ── 色板常量 (由 BugDetail 场景抽到此共用) ──────────────────────
 // 优先级:按名称键映射上色(数据语义色,不属于品牌 token,保留于此)

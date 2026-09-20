@@ -45,7 +45,7 @@ pip install -e .
 **配置环境变量**：创建 `backend/.env`（可复制 `.env.example` 修改）：
 
 ```ini
-MSQL_DSN=mysql+pymysql://iteruser:iterpass123@127.0.0.1:3306/iterdb
+MSQL_DSN=mysql+pymysql://your_user:your_password@127.0.0.1:3306/iterdb
 JWT_SECRET_KEY=please-replace-with-a-long-random-string-at-least-32-chars
 PUSH_ENABLED=false
 ```

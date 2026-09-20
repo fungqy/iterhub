@@ -58,19 +58,18 @@ class DbOperator:
 
     @staticmethod
     def truncate_table(table_name):
-        """清空表数据(只接受白名单标识符,防 SQL 注入)"""
+        """清空表数据(只接受白名单标识符,防 SQL 注入)。
+
+        ⚠ 失败时**向上抛**,不再静默吞掉:历史实现只记日志就返回,调用方以为
+        清空成功、接着 append,结果「没清掉但写了新的」产生重复数据
+        (调用点见 task/report_wiki_data.py)。
+        """
         _assert_valid_identifier(table_name, "table")
-        try:
-            with DbOperator.get_engine().begin() as conn:
-                conn.execute(text(f"TRUNCATE TABLE `{table_name}`;"))
-        except Exception as e:
-            logger.error("truncate_table(%s) 失败: %s", table_name, e)
+        with DbOperator.get_engine().begin() as conn:
+            conn.execute(text(f"TRUNCATE TABLE `{table_name}`;"))
 
     @staticmethod
     def exec_sql(sql_query):
-        """执行SQL语句"""
-        try:
-            with DbOperator.get_engine().begin() as conn:
-                conn.execute(text(sql_query))
-        except Exception as e:
-            logger.error("exec_sql 失败: %s | SQL: %s", e, sql_query)
+        """执行SQL语句(失败向上抛,不静默吞掉)"""
+        with DbOperator.get_engine().begin() as conn:
+            conn.execute(text(sql_query))
