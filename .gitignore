@@ -74,3 +74,6 @@ backend/backups/
 backend/sql/iterdb.sql
 backend/sql/iterdb-0915.sql
 docs/应用平台现场问题沟通新.xlsx
+
+
+deployment-local.yml
