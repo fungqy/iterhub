@@ -11,7 +11,7 @@ import Tag from 'primevue/tag'
 import ProgressSpinner from 'primevue/progressspinner'
 
 // 工时不一致明细弹窗:由父级(Reports.vue)在迭代概览「工时」卡下钻时打开,
-// 父级负责取数,本组件只做纯展示(与 UnplannedStoriesDialog / AvgTimeDevelopersDialog 同构)。
+// 父级负责取数,本组件只做纯展示(与 StoryListDialog / AvgTimeDevelopersDialog 同构)。
 //
 // 这份清单回答的是「合计为什么对不上」:列出**计划工时与投入工时不相等的每一个条目**,
 // 按差额(投入 − 计划)从大到小 —— 正的在上(多报),负的在下(漏填)。

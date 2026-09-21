@@ -110,7 +110,7 @@
   /* ── 弹窗尺寸四档 ── */
   --ih-dialog-sm: min(500px, 95vw); /* 确认类:ManualExecuteDialog */
   --ih-dialog-md: min(760px, 95vw); /* 表单/单表:ProjectList 编辑、TeamMembersDialog */
-  --ih-dialog-lg: min(1200px, 95vw); /* 宽表:DocBugImport、AvgTimeDevelopersDialog、BurndownDialog、SprintSummaryDialog、UnplannedStoriesDialog */
+  --ih-dialog-lg: min(1200px, 95vw); /* 宽表:DocBugImport、AvgTimeDevelopersDialog、BurndownDialog、SprintSummaryDialog、StoryListDialog */
   --ih-dialog-xl: min(1360px, 95vw); /* 最宽表:BugDetailDialog、BugListDialog、ReportReopenDialog(2026-09-21 由 lg 升到 xl:重开列表补齐到 8 列,与故障明细同档) */
 
   /* ── 抽屉尺寸 ──

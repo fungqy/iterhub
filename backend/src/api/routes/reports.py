@@ -1173,6 +1173,8 @@ async def get_sprint_summary(
       「至少被一个用例关联过的故事」。分母复用「故事数」口径(issue_type ∈
       {故事, 简单故事},不带 status 过滤),故「已覆盖 + 未覆盖 == 故事总数」恒成立。
       故事数为 0 时返回 null(无分母,与其余比率同规则)。
+      「未覆盖」的逐条明细见 /case-uncovered-stories(前端覆盖率卡下钻用),
+      那边是同一集合的 NOT EXISTS 写法,两处判定必须成对修改。
     """
     with get_session() as session:
         sprint_row = session.execute(text("""
@@ -1536,6 +1538,56 @@ async def get_unplanned_stories(
               AND issue_type IN ('故事', '简单故事')
               AND is_unplaned = 1
             ORDER BY created ASC
+        """), {"sprint_id": sprint_id}).fetchall()
+
+        return [
+            {
+                "issue_key": row[0],
+                "issue_name": row[1] or '',
+                "status": row[2] or '',
+                "priority": row[3],
+                "assignee": row[4],
+                "created": row[5].isoformat(sep=" ") if row[5] else None,
+            }
+            for row in result
+        ]
+
+
+@router.get("/case-uncovered-stories")
+async def get_case_uncovered_stories(
+    sprint_id: int,
+    current_user: dict = Depends(get_current_user_from_header)
+):
+    """获取指定 Sprint 中「未被任何测试用例覆盖」的故事列表(按创建时间升序)。
+
+    与 /sprint-summary 的 case_uncovered_story_count **同源互补**:那边用
+    INNER JOIN rdm_testcase 数「被引用过的故事」,这里用 NOT EXISTS 取其补集,
+    两个判定逐字对偶,故「本接口行数 + 覆盖数 == 故事总数」恒成立 ——
+    改任一侧的关联条件都必须同时改另一侧,否则卡片与列表会对不上。
+
+    行结构、排序与 /unplanned-stories 完全一致(前端两张列表共用同一个弹窗),
+    故这里也只做「把计数展开成逐条明细」。
+
+    ⚠ 关联只看 rdm_testcase.story_key,**不带该表的 sprint_id 条件**:
+      故事从 A 迭代挪到 B 迭代时,导入侧按用例自身的需求清理旧行,
+      rdm_testcase.sprint_id 会停在导入当时解析出的迭代,带上它会把 B 迭代里
+      确实被用例覆盖的故事误判成「未覆盖」(与 /sprint-summary 的覆盖率口径同源)。"""
+    with get_session() as session:
+        result = session.execute(text("""
+            SELECT
+                i.issue_key,
+                i.issue_name,
+                i.status,
+                COALESCE(i.priority, '') AS priority,
+                COALESCE(i.assignee, '') AS assignee,
+                i.created
+            FROM rdm_issue i
+            WHERE i.sprint_id = :sprint_id
+              AND i.issue_type IN ('故事', '简单故事')
+              AND NOT EXISTS (
+                  SELECT 1 FROM rdm_testcase t WHERE t.story_key = i.issue_key
+              )
+            ORDER BY i.created ASC
         """), {"sprint_id": sprint_id}).fetchall()
 
         return [

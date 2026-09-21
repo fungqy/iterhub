@@ -7,7 +7,7 @@ import Column from 'primevue/column'
 import ProgressSpinner from 'primevue/progressspinner'
 
 // 团队成员明细弹窗:由父级(Reports.vue)在「团队成员」卡下钻时打开,
-// 父级负责取数,本组件只做纯展示(与 AvgTimeDevelopersDialog / UnplannedStoriesDialog 同构)。
+// 父级负责取数,本组件只做纯展示(与 AvgTimeDevelopersDialog / StoryListDialog 同构)。
 //
 // 口径以后端 /reports/sprint-members 的 docstring 为准,两条容易误读的在此点明:
 // 1. 行集恒等于概览卡片上的成员数,含「任务数与故障数都为 0」的成员 ——

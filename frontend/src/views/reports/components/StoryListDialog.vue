@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { type UnplannedStoryItem } from '@/api/reports'
+import { type StoryListItem } from '@/api/reports'
 import { RDM_BROWSE_URL } from './charts'
 import { formatDate } from '@/utils/datetime'
 import { TH } from '@/constants/tableHeaders'
@@ -9,12 +9,21 @@ import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import ProgressSpinner from 'primevue/progressspinner'
 
-// 计划外故事列表弹窗:由父级(Reports.vue)在「计划外故事占比」卡下钻时打开,
-// 父级负责取数,本组件只做纯展示(与 AvgTimeDevelopersDialog 同构)。
-// 计划外 = Sprint 激活后才创建的故事(rdm_issue.is_unplaned = 1)。
+// 故事列表弹窗:Sprint 内**某一子集故事**的明细表,由父级(Reports.vue)在概览卡下钻时打开,
+// 父级负责取数,本组件只做纯展示(与 AvgTimeDevelopersDialog / TeamMembersDialog 同构)。
+//
+// 目前服务两种下钻 —— 两者行结构、列、交互完全一致,差异只在文案,故文案做成 props:
+//   1. 「计划外故事占比」卡 → 计划外故事(rdm_issue.is_unplaned = 1,Sprint 激活后插入);
+//   2. 「用例覆盖率」卡    → 未被用例覆盖的故事(rdm_testcase 里没有任何一行引用到它)。
+// ⚠ 文案**不给默认值**:两处语气不同(「该迭代无计划外故事」 vs 「该迭代的故事均已被用例覆盖」),
+//   留个默认值只会在调用方漏传时静默显示成另一张表的说法。
 defineProps<{
   visible: boolean
-  stories: UnplannedStoryItem[]
+  /** 标题 / 副标题 / 空态文案,由调用方按自己的口径给出(见上方说明) */
+  title: string
+  subtitle: string
+  emptyText: string
+  stories: StoryListItem[]
   loading: boolean
 }>()
 
@@ -33,8 +42,8 @@ const emit = defineEmits<{
   >
     <template #header>
       <div class="flex flex-col gap-1">
-        <span>计划外故事列表</span>
-        <span class="ds-meta">Sprint 激活后插入的故事（计划外）</span>
+        <span>{{ title }}</span>
+        <span class="ds-meta">{{ subtitle }}</span>
       </div>
     </template>
     <div v-if="loading" class="flex flex-col items-center gap-2 py-8">
@@ -70,6 +79,6 @@ const emit = defineEmits<{
         </template>
       </Column>
     </DataTable>
-    <div v-else class="ds-empty">该迭代无计划外故事</div>
+    <div v-else class="ds-empty">{{ emptyText }}</div>
   </Dialog>
 </template>

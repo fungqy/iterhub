@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, onUnmounted, computed, nextTick } from 'vue'
-import { reportsApi, type AvgTimeDeveloperItem, type ProjectOption, type ReopenBugItem, type SprintMemberItem, type SprintMetricsItem, type SprintOption, type UnplannedStoryItem, type WorktimeMismatchResponse } from '@/api/reports'
+import { reportsApi, type AvgTimeDeveloperItem, type ProjectOption, type ReopenBugItem, type SprintMemberItem, type SprintMetricsItem, type SprintOption, type StoryListItem, type WorktimeMismatchResponse } from '@/api/reports'
 import { useNotify } from '@/utils/notify'
 import { formatDate } from '@/utils/datetime'
 import { sprintStateText, sprintStateSeverity, sprintIsActive } from '@/constants/sprintMeta'
@@ -14,7 +14,7 @@ import ReportReopenDialog from './components/ReportReopenDialog.vue'
 import AvgTimeDevelopersDialog from './components/AvgTimeDevelopersDialog.vue'
 import SprintSummaryDialog from './components/SprintSummaryDialog.vue'
 import TeamMembersDialog from './components/TeamMembersDialog.vue'
-import UnplannedStoriesDialog from './components/UnplannedStoriesDialog.vue'
+import StoryListDialog from './components/StoryListDialog.vue'
 import WorktimeMismatchDialog from './components/WorktimeMismatchDialog.vue'
 import BugDetailDialog from './BugDetailDialog.vue'
 import BurndownDialog from './components/BurndownDialog.vue'
@@ -271,7 +271,7 @@ async function openAvgTimeDevelopers(sprintId: unknown) {
 
 // ── 计划外故事:点击「计划外故事占比」卡打开该 Sprint 的计划外故事列表 ──
 const unplannedDialogVisible = ref(false)
-const unplannedStories = ref<UnplannedStoryItem[]>([])
+const unplannedStories = ref<StoryListItem[]>([])
 const loadingUnplanned = ref(false)
 
 async function openUnplannedStories(sprintId: unknown) {
@@ -286,6 +286,29 @@ async function openUnplannedStories(sprintId: unknown) {
     notifyError('加载计划外故事失败')
   } finally {
     loadingUnplanned.value = false
+  }
+}
+
+// ── 未被用例覆盖的故事:点击概览「用例覆盖率」卡(仅当覆盖率 < 100% 时该卡才可点)
+//    打开这些故事的明细。列表结构、列与交互与计划外故事列表相同(共用 StoryListDialog),
+//    只是数据源换成 /reports/case-uncovered-stories —— 故两套状态各自独立持有,
+//    不共享 ref:两张列表可能先后打开,共用会让后开的那张显示成上一张的残留数据。
+const uncoveredDialogVisible = ref(false)
+const uncoveredStories = ref<StoryListItem[]>([])
+const loadingUncovered = ref(false)
+
+async function openCaseUncoveredStories(sprintId: unknown) {
+  const sid = setActiveSprint(sprintId)
+  uncoveredDialogVisible.value = true
+  if (sid == null) return
+  loadingUncovered.value = true
+  try {
+    const res = await reportsApi.getCaseUncoveredStories(sid)
+    uncoveredStories.value = res
+  } catch {
+    notifyError('加载未被用例覆盖的故事失败')
+  } finally {
+    loadingUncovered.value = false
   }
 }
 
@@ -696,9 +719,10 @@ onMounted(() => {
       :loading="loadingAvgTimeDevelopers"
     />
 
-    <!-- Sprint Summary Dialog(时间轴点位点击)—— 以下四种下钻的**唯一入口**:
+    <!-- Sprint Summary Dialog(时间轴点位点击)—— 下列下钻的**唯一入口**:
          故事数 → 燃尽图、故障数 → 故障分布、故障平均解决时长 → 时长明细、
-         故障重开率 → 故障重开列表。
+         计划外故事占比 → 计划外故事列表、用例覆盖率 → 未被覆盖的故事列表、
+         团队成员 → 成员明细、故障重开率 → 故障重开列表、工时 → 工时不一致明细。
          质量报表页上的对应趋势图 / 分布表已全部不再可点(见上方那几张卡的注释)。 -->
     <SprintSummaryDialog
       v-model:visible="summaryDialogVisible"
@@ -706,16 +730,29 @@ onMounted(() => {
       @open-bug-detail="openBugDetailBySprint"
       @open-avg-time="openAvgTimeDevelopers"
       @open-unplanned-stories="openUnplannedStories"
+      @open-case-uncovered="openCaseUncoveredStories"
       @open-team-members="openTeamMembers"
       @open-reopen-bugs="openReopenBugs"
       @open-worktime-mismatch="openWorktimeMismatch"
     />
 
-    <!-- Unplanned Stories Dialog（计划外故事占比卡下钻）-->
-    <UnplannedStoriesDialog
+    <!-- Story List Dialog（两种「故事子集」下钻共用同一个组件，文案由调用方给）:
+         1. 计划外故事占比卡 → 计划外故事;2. 用例覆盖率卡 → 未被用例覆盖的故事 -->
+    <StoryListDialog
       v-model:visible="unplannedDialogVisible"
+      title="计划外故事列表"
+      subtitle="Sprint 激活后插入的故事（计划外）"
+      empty-text="该迭代无计划外故事"
       :stories="unplannedStories"
       :loading="loadingUnplanned"
+    />
+    <StoryListDialog
+      v-model:visible="uncoveredDialogVisible"
+      title="未被用例覆盖的故事"
+      subtitle="本迭代中没有被任何测试用例关联的故事"
+      empty-text="该迭代的故事均已被用例覆盖"
+      :stories="uncoveredStories"
+      :loading="loadingUncovered"
     />
 
     <!-- Team Members Dialog（团队成员卡下钻）-->

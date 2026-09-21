@@ -119,7 +119,14 @@ export interface WorktimeMismatchResponse {
   rows: WorktimeMismatchRow[]
 }
 
-export interface UnplannedStoryItem {
+/**
+ * 故事列表行(Sprint 内某一子集的故事明细)。
+ * 两张列表共用同一行结构,区别只在**筛选口径**(后端两个接口同表同投影):
+ * - /reports/unplanned-stories → 计划外故事(is_unplaned = 1);
+ * - /reports/case-uncovered-stories → 未被用例覆盖的故事(rdm_testcase 无引用行)。
+ * 前端也用同一个弹窗渲染(见 StoryListDialog)。
+ */
+export interface StoryListItem {
   issue_key: string
   issue_name: string
   status: string
@@ -403,8 +410,17 @@ export const reportsApi = {
   },
 
   /** 指定 Sprint 的计划外故事列表(「计划外故事占比」卡下钻用)。无计划外故事时返回空数组 */
-  getUnplannedStories(sprintId: number): Promise<UnplannedStoryItem[]> {
-    return get<UnplannedStoryItem[]>('/reports/unplanned-stories', { sprint_id: sprintId })
+  getUnplannedStories(sprintId: number): Promise<StoryListItem[]> {
+    return get<StoryListItem[]>('/reports/unplanned-stories', { sprint_id: sprintId })
+  },
+
+  /**
+   * 指定 Sprint 中「未被任何用例覆盖」的故事列表(「用例覆盖率」卡下钻用)。
+   * 与 /sprint-summary 的 case_uncovered_story_count 同源互补,行数与之一致;
+   * 行结构与计划外故事列表完全一致,前端共用 StoryListDialog 渲染。
+   */
+  getCaseUncoveredStories(sprintId: number): Promise<StoryListItem[]> {
+    return get<StoryListItem[]>('/reports/case-uncovered-stories', { sprint_id: sprintId })
   },
 
   /** 指定 Sprint 的成员工作分布(「团队成员」卡下钻用)。行数 = 概览成员数 */

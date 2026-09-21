@@ -46,11 +46,13 @@ const METRIC_HELP: Record<string, string> = {
 //     同日一并下线「故障数 / 成员」(bug_per_member):该比值与同屏的「故障数」
 //     「团队成员」两张卡完全共料,读者一眼就能相除,单独占一格的价值不足。)
 // 4. 可下钻的卡一律把意图 emit 给父级,本组件不持有任何弹窗(同一个弹窗挂两份实例会
-//    出现两套互不相干的加载状态)。2026-09-21 起本弹窗还是四种下钻的**唯一入口**:
+//    出现两套互不相干的加载状态)。2026-09-21 起本弹窗是下列八种下钻的**唯一入口**,
+//    质量报表页上原来那几处重复入口(三张同名趋势图 + 「故障重开数」分布表)已改为纯展示:
 //      故事数 → 燃尽图、故障数 → 故障分布统计、故障平均解决时长 → 时长明细、
-//      故障重开率 → 故障重开列表。
-//    质量报表页上那三张同名趋势图与「故障重开数」分布表都已改为纯展示(见 Reports.vue),
-//    别再让页面上的图 / 表也能点开同一份明细。
+//      计划外故事占比 → 计划外故事列表、用例覆盖率 → 未被用例覆盖的故事列表、
+//      团队成员 → 成员明细、故障重开率 → 故障重开列表、工时 → 工时不一致明细。
+//    ⚠ 这份清单要与下方 emit 声明逐条对齐,新增下钻时两处一起加 —— 别再让页面上的
+//      图 / 表也能点开同一份明细。
 const props = defineProps<{
   visible: boolean
 }>()
@@ -67,8 +69,10 @@ const emit = defineEmits<{
   'open-bug-detail': [sprintId: number]
   /** 请求打开「故障平均解决时长(工作日口径)」弹窗(由父级复用既有 AvgTimeDevelopersDialog) */
   'open-avg-time': [sprintId: number]
-  /** 请求打开「计划外故事列表」弹窗(由父级复用既有 UnplannedStoriesDialog) */
+  /** 请求打开「计划外故事列表」弹窗(由父级复用 StoryListDialog) */
   'open-unplanned-stories': [sprintId: number]
+  /** 请求打开「未被用例覆盖的故事列表」弹窗(与计划外故事列表同一个 StoryListDialog) */
+  'open-case-uncovered': [sprintId: number]
   /** 请求打开「团队成员明细」弹窗(由父级复用既有 TeamMembersDialog) */
   'open-team-members': [sprintId: number]
   /** 请求打开「故障重开列表」弹窗(由父级复用既有 ReportReopenDialog) */
@@ -221,6 +225,15 @@ const worktimeOverPlan = computed(() => {
   )
 })
 
+/**
+ * 存在未被用例覆盖的故事 —— 「用例覆盖率」卡可下钻的唯一判据。
+ * 卡片能否渲染成 button、点击是否派发事件,两处必须同源(见 openCaseUncovered),
+ * 否则会留下「可点但点开是空表」或「有明细却点不动」两种假控件之一。
+ * ⚠ 用计数而不是 `rate < 1` 判断:后者要处理 null(该迭代无故事)与浮点相等两件事,
+ *   而计数由后端与覆盖率同一处口径给出,为 0 时天然不可点。
+ */
+const hasUncoveredStories = computed(() => (summary.value?.case_uncovered_story_count ?? 0) > 0)
+
 /** 故障解决总时长(工作日秒)= 开发 + 测试 */
 const bugTotalSeconds = computed(() => {
   const s = summary.value
@@ -309,11 +322,21 @@ function openAvgTime() {
   if (s && bugTotalSeconds.value > 0) emit('open-avg-time', s.sprint_id)
 }
 
-/** 计划外故事占比卡 → 「计划外故事列表」弹窗(父级复用 UnplannedStoriesDialog)。
+/** 计划外故事占比卡 → 「计划外故事列表」弹窗(父级复用 StoryListDialog)。
  *  与 openBugDetail 同构:本组件不持有弹窗,只递意图上去;无计划外故事(count 为 0)时不下钻。 */
 function openUnplannedStories() {
   const s = summary.value
   if (s && s.story_unplanned_count > 0) emit('open-unplanned-stories', s.sprint_id)
+}
+
+/** 用例覆盖率卡 → 「未被用例覆盖的故事列表」弹窗(父级复用同一个 StoryListDialog,
+ *  只是数据源换成 /reports/case-uncovered-stories)。
+ *  与 openUnplannedStories 同构:本组件不持有弹窗,只递意图上去;
+ *  覆盖率已达 100%(没有未覆盖的故事)时不下钻 —— 那时卡片退回 div,本就不是可点控件,
+ *  点开也只会看到空表。判据与卡片能否渲染成 button 完全同源(hasUncoveredStories)。 */
+function openCaseUncovered() {
+  const s = summary.value
+  if (s && hasUncoveredStories.value) emit('open-case-uncovered', s.sprint_id)
 }
 
 /** 团队成员卡 → 「团队成员明细」弹窗(父级复用 TeamMembersDialog),展示成员的
@@ -632,12 +655,25 @@ function openWorktimeMismatch() {
              同源(rdm_testcase.story_key 就是被用例引用到的故事 key)。
              载体选进度条卡而非环图:除比率外还要同时交代已覆盖/未覆盖两个故事数,
              环内只放得下一个百分比。分档沿用故事完成率的阈值,低覆盖一眼可辨。
-             无故事时 rate 为 null → 整卡预留(与「计划外故事占比」同规则)。 -->
-        <div
+             无故事时 rate 为 null → 整卡预留(与「计划外故事占比」同规则)。
+             ⚠ 覆盖率 < 100%(存在未被用例覆盖的故事)时整卡可下钻,打开这些故事的明细列表
+                (用户 2026-09-21;与「计划外故事列表」同一张表、同一个弹窗,只是数据源不同)。
+                可达 100% 时退回 div:那时没有「漏了哪些」可看,留个可点却空转的控件只会误导。
+             ⚠ 卡片上**不写**「· 点击查看…」(用户 2026-09-21 明确要求):本卡副标题已经要
+                交代「已覆盖 x / 故事 y · 未覆盖 z」三段,再挂提示文字会把副标题挤成两行;
+                可点性由 .is-clickable 的悬停/聚焦态承担 —— 这也是它在本弹窗里与其余
+                可下钻卡唯一不同的地方,别当成漏写而"补"回去。 -->
+        <component
+          :is="hasUncoveredStories ? 'button' : 'div'"
+          v-bind="hasUncoveredStories ? { type: 'button' } : {}"
           class="ds-metric"
-          :class="summary.case_coverage_rate === null
-            ? 'is-reserved'
-            : ['is-bar', caseCoverageTone]"
+          :class="[
+            summary.case_coverage_rate === null
+              ? 'is-reserved'
+              : ['is-bar', caseCoverageTone],
+            hasUncoveredStories ? 'is-clickable' : '',
+          ]"
+          @click="openCaseUncovered"
         >
           <span class="ds-metric-label">用例覆盖率<MetricHelp :help="METRIC_HELP.caseCoverage" /></span>
           <span class="ds-metric-value">{{ rateToPercent(summary.case_coverage_rate) }}</span>
@@ -650,7 +686,7 @@ function openWorktimeMismatch() {
             </span>
           </template>
           <span v-else class="ds-metric-badge">该迭代无故事</span>
-        </div>
+        </component>
 
         <!-- 用例数/故事:分母做成胶囊,避免把比值读成绝对值(本弹窗现存的唯一 is-ratio 卡;
              原先同构的「故障数 / 成员」已于 2026-09-21 下线)。
