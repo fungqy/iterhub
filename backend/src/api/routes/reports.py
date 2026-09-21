@@ -45,6 +45,27 @@ RDM_TAG_ALIAS: dict[str, str] = {
 }
 
 
+def _sid(sprint_id: int) -> str:
+    """Sprint ID 的 **SQL 绑定值**统一转成字符串 —— 必须与列同型,否则索引直接失效。
+
+    病根:本模块所有路由的参数都是 `sprint_id: int`,而库里
+      rdm_issue / rdm_doc_bug / rdm_sprint / rdm_testcase / rdm_story_changelog / rdm_bug_changelog
+    的 sprint_id 全是 **varchar**。MySQL 的规则是「数字与字符串比较时把字符串转成数字」,
+    于是转换发生在**列**这一侧 ⇒ idx_issues_sprint_id 进了 possible_keys 也用不上,退化成全表扫描。
+    实测(2026-09-21,EXPLAIN,同一条件只差引号):
+        WHERE sprint_id = 8354   → type=ALL, rows=2652   ← 全表扫
+        WHERE sprint_id = '8354' → type=ref, rows=61     ← 走索引
+    报表页一个请求里就是几十条这种查询(project-metrics 按 Sprint 循环、sprint-summary 有十几条),
+    所以这条看似"无伤大雅"的类型不一致会被乘成一个可感知的卡顿。
+
+    ⚠ 为什么可以无脑对所有表用:rdm_bug_duration / rdm_bug_avgtime_sprint 的 sprint_id 是 **BIGINT**,
+      字符串常量在数值比较里会被转成数字(常量只转一次),索引照常可用 —— 故不需要按表分支判断。
+    ⚠ 只用于 **SQL 绑定值**。响应体里的 sprint_id 必须继续是数字(前端按 number 消费,
+      详见 api/reports.ts 里各响应类型),不要顺手把这个函数用到 return 的字典里。
+    """
+    return str(sprint_id)
+
+
 def parse_tag(raw: str | None, source: str = 'RDM') -> str:
     """把「原因」原始值归到一个标签，供「原因分布」统计。统一出口 = CANONICAL_TAGS 用词。
 
@@ -260,7 +281,7 @@ async def get_sprint_metrics(
             WHERE sprint_id = :sprint_id
             AND issue_type IN ('故事', '简单故事')
         """)
-        story_result = session.execute(story_query, {"sprint_id": sprint_id})
+        story_result = session.execute(story_query, {"sprint_id": _sid(sprint_id)})
         story_count = story_result.fetchone()[0] or 0   # type: ignore[attr-defined]
 
         # 故障数：issueType 为 故障
@@ -270,7 +291,7 @@ async def get_sprint_metrics(
                 (SELECT COUNT(*) FROM rdm_doc_bug WHERE sprint_id = :sprint_id)
             AS total_count;
         """)
-        bug_result = session.execute(bug_query, {"sprint_id": sprint_id})
+        bug_result = session.execute(bug_query, {"sprint_id": _sid(sprint_id)})
         bug_count = bug_result.fetchone()[0] or 0   # type: ignore[attr-defined]
 
         # 故障重开数：rdm_issue关联rdm_bug_changelog，存在"待测试 -> 处理中"变更记录
@@ -282,7 +303,7 @@ async def get_sprint_metrics(
             AND i.issue_type = '故障'
             AND c.change_detail = '待测试 -> 处理中'
         """)
-        reopen_result = session.execute(reopen_query, {"sprint_id": sprint_id})
+        reopen_result = session.execute(reopen_query, {"sprint_id": _sid(sprint_id)})
         bug_reopen_count = reopen_result.fetchone()[0] or 0   # type: ignore[attr-defined]
 
         return {
@@ -306,7 +327,7 @@ async def get_sprint_burndown(
             WHERE sprint_id = :sprint_id
             LIMIT 1
         """)
-        sprint_row = session.execute(sprint_query, {"sprint_id": sprint_id}).fetchone()
+        sprint_row = session.execute(sprint_query, {"sprint_id": _sid(sprint_id)}).fetchone()
 
         # 故事列表：LEFT JOIN 故事变更记录取完成时间（resolutiondate），口径与 rdm_story_duration 一致
         story_query = text("""
@@ -321,7 +342,7 @@ async def get_sprint_burndown(
             WHERE i.sprint_id = :sprint_id
             AND i.issue_type IN ('故事', '简单故事')
         """)
-        stories = session.execute(story_query, {"sprint_id": sprint_id}).fetchall()
+        stories = session.execute(story_query, {"sprint_id": _sid(sprint_id)}).fetchall()
 
         empty_result = {
             "sprint_id": sprint_id, "sprint_name": "", "start_date": None,
@@ -413,7 +434,7 @@ async def get_bug_details(
             FROM rdm_doc_bug
             WHERE sprint_id = :sprint_id
         """)
-        result = session.execute(query, {"sprint_id": sprint_id})
+        result = session.execute(query, {"sprint_id": _sid(sprint_id)})
         rows = result.fetchall()
 
         # 定义优先级排序
@@ -538,7 +559,7 @@ async def get_bug_list(
                 AND maker = :developer
             """)
             result = session.execute(query, {
-                "sprint_id": sprint_id,
+                "sprint_id": _sid(sprint_id),
                 "developer": developer
             })
         else:
@@ -569,7 +590,7 @@ async def get_bug_list(
                 FROM rdm_doc_bug d
                 WHERE sprint_id = :sprint_id
             """)
-            result = session.execute(query, {"sprint_id": sprint_id})
+            result = session.execute(query, {"sprint_id": _sid(sprint_id)})
         rows = result.fetchall()
         logger.info(f"原始查询结果: {rows}")
 
@@ -626,7 +647,7 @@ async def get_bug_avg_time(
             FROM rdm_bug_avgtime_sprint
             WHERE sprint_id = :sprint_id
         """)
-        result = session.execute(query, {"sprint_id": sprint_id})
+        result = session.execute(query, {"sprint_id": _sid(sprint_id)})
         row = result.fetchone()
 
         return {
@@ -658,7 +679,7 @@ async def get_bug_avg_time_by_developers(
             HAVING total_seconds > 0
             ORDER BY total_seconds DESC, dev_seconds DESC
         """)
-        result = session.execute(query, {"sprint_id": sprint_id})
+        result = session.execute(query, {"sprint_id": _sid(sprint_id)})
         rows = result.fetchall()
 
         items = []
@@ -826,7 +847,7 @@ async def get_bug_one(
         params: dict = {"issue_key": issue_key}
         if sprint_id is not None:
             sql += " AND sprint_id = :sprint_id"
-            params["sprint_id"] = sprint_id
+            params["sprint_id"] = _sid(sprint_id)
         sql += " ORDER BY updated DESC LIMIT 1"
 
         row = session.execute(text(sql), params).fetchone()
@@ -898,7 +919,7 @@ async def get_reopen_bugs(
                      i.reporter, i.bug_type, i.priority, i.bug_reason, i.resolution
             ORDER BY i.priority, i.issue_key
         """)
-        result = session.execute(query, {"sprint_id": sprint_id})
+        result = session.execute(query, {"sprint_id": _sid(sprint_id)})
         rows = result.fetchall()
 
         items = []
@@ -991,7 +1012,7 @@ async def get_project_sprints_metrics(
                     WHERE sprint_id = :sprint_id
                     AND issue_type IN ('故事', '简单故事')
                 """)
-                story_result = session.execute(story_query, {"sprint_id": sprint_id})
+                story_result = session.execute(story_query, {"sprint_id": _sid(sprint_id)})
                 story_count = story_result.fetchone()[0] or 0   # type: ignore[attr-defined]
 
                 # 故障数
@@ -1003,7 +1024,7 @@ async def get_project_sprints_metrics(
                          WHERE sprint_id = :sprint_id)
                     AS total_count
                 """)
-                bug_result = session.execute(bug_query, {"sprint_id": sprint_id})
+                bug_result = session.execute(bug_query, {"sprint_id": _sid(sprint_id)})
                 bug_count = bug_result.fetchone()[0] or 0   # type: ignore[attr-defined]
 
                 # 故障重开「次数分布」:同一批「待测试 -> 处理中」变更记录,
@@ -1027,7 +1048,7 @@ async def get_project_sprints_metrics(
                     GROUP BY t.reopen_times
                 """)
                 reopen_once = reopen_twice = reopen_many = 0
-                reopen_rows = session.execute(reopen_query, {"sprint_id": sprint_id}).fetchall()
+                reopen_rows = session.execute(reopen_query, {"sprint_id": _sid(sprint_id)}).fetchall()
                 for reopen_times, bucket_count in reopen_rows:
                     times = int(reopen_times or 0)
                     count = int(bucket_count or 0)
@@ -1047,7 +1068,7 @@ async def get_project_sprints_metrics(
                     FROM rdm_bug_avgtime_sprint
                     WHERE sprint_id = :sprint_id
                 """)
-                avg_time_result = session.execute(avg_time_query, {"sprint_id": sprint_id})
+                avg_time_result = session.execute(avg_time_query, {"sprint_id": _sid(sprint_id)})
                 avg_time_row = avg_time_result.fetchone()
 
                 metrics_list.append({
@@ -1183,7 +1204,7 @@ async def get_sprint_summary(
             FROM rdm_sprint
             WHERE sprint_id = :sprint_id
             LIMIT 1
-        """), {"sprint_id": sprint_id}).fetchone()
+        """), {"sprint_id": _sid(sprint_id)}).fetchone()
 
         # Sprint 不存在(或已被 RDM 侧移除)时返回空对象,前端据此走空态分支
         if not sprint_row:
@@ -1214,7 +1235,7 @@ async def get_sprint_summary(
                     AS story_pending_accept_count
             FROM rdm_issue
             WHERE sprint_id = :sprint_id
-        """), {"sprint_id": sprint_id}).fetchone()
+        """), {"sprint_id": _sid(sprint_id)}).fetchone()
 
         if agg is not None:
             story_count = int(agg[0] or 0)
@@ -1230,7 +1251,7 @@ async def get_sprint_summary(
         # 文档类故障:只在 rdm_doc_bug 中,不落 rdm_issue
         doc_bug_count = session.execute(text("""
             SELECT COUNT(*) FROM rdm_doc_bug WHERE sprint_id = :sprint_id
-        """), {"sprint_id": sprint_id}).fetchone()[0] or 0
+        """), {"sprint_id": _sid(sprint_id)}).fetchone()[0] or 0
 
         bug_count = bug_rdm_count + int(doc_bug_count)
 
@@ -1240,7 +1261,7 @@ async def get_sprint_summary(
         case_count = int(session.execute(text("""
             SELECT COUNT(DISTINCT case_id) FROM rdm_testcase
             WHERE sprint_id = :sprint_id
-        """), {"sprint_id": sprint_id}).fetchone()[0] or 0)
+        """), {"sprint_id": _sid(sprint_id)}).fetchone()[0] or 0)
 
         # ── 用例覆盖率:本 Sprint 内「被测试用例关联过」的故事数 ──
         # 关联关系就是 rdm_testcase.story_key —— 导入侧写入的每一行都代表「某用例的
@@ -1256,7 +1277,7 @@ async def get_sprint_summary(
             INNER JOIN rdm_testcase t ON t.story_key = i.issue_key
             WHERE i.sprint_id = :sprint_id
             AND i.issue_type IN ('故事', '简单故事')
-        """), {"sprint_id": sprint_id}).fetchone()[0] or 0)
+        """), {"sprint_id": _sid(sprint_id)}).fetchone()[0] or 0)
 
         # ── 故障重开数(与 /metrics 同口径)──
         bug_reopen_count = session.execute(text("""
@@ -1266,7 +1287,7 @@ async def get_sprint_summary(
             WHERE i.sprint_id = :sprint_id
             AND i.issue_type = '故障'
             AND c.change_detail = '待测试 -> 处理中'
-        """), {"sprint_id": sprint_id}).fetchone()[0] or 0
+        """), {"sprint_id": _sid(sprint_id)}).fetchone()[0] or 0
 
         # ── 团队成员(并集去重,按任务数排序)──
         # 成员范围同 /sprint-members:assignee ∪ developer ∪ tester 去重;
@@ -1297,7 +1318,7 @@ async def get_sprint_summary(
                 GROUP BY assignee
             ) t ON t.member = m.member
             ORDER BY COALESCE(t.task_count, 0) DESC, m.member ASC
-        """), {"sprint_id": sprint_id}).fetchall()
+        """), {"sprint_id": _sid(sprint_id)}).fetchall()
         members = [r[0] for r in member_rows]
 
         # ── 故障平均解决时长(工作日口径)──
@@ -1307,7 +1328,7 @@ async def get_sprint_summary(
                    COALESCE(AVG(finish_seconds), 0)
             FROM rdm_bug_avgtime_sprint
             WHERE sprint_id = :sprint_id
-        """), {"sprint_id": sprint_id}).fetchone()
+        """), {"sprint_id": _sid(sprint_id)}).fetchone()
 
         # ── 工作日数(sys_workday 是工作日的唯一源)──
         # 计划区间与「激活 → 完成」实际区间**各算一份**:两个自然日跨度
@@ -1444,7 +1465,7 @@ async def get_sprint_members(
             ) b ON b.member = m.member
             -- 有产出的排前面,0/0 行垫底(保留但不占视线);同档按人名稳定排序
             ORDER BY task_count DESC, bug_count DESC, m.member ASC
-        """), {"sprint_id": sprint_id}).fetchall()
+        """), {"sprint_id": _sid(sprint_id)}).fetchall()
 
         return [
             {
@@ -1501,7 +1522,7 @@ async def get_sprint_reopen_members(
             WHERE t.member IS NOT NULL AND t.member <> ''
             GROUP BY t.member
             ORDER BY reopen_total DESC, t.member ASC
-        """), {"sprint_id": sprint_id}).fetchall()
+        """), {"sprint_id": _sid(sprint_id)}).fetchall()
 
         return [
             {
@@ -1538,7 +1559,7 @@ async def get_unplanned_stories(
               AND issue_type IN ('故事', '简单故事')
               AND is_unplaned = 1
             ORDER BY created ASC
-        """), {"sprint_id": sprint_id}).fetchall()
+        """), {"sprint_id": _sid(sprint_id)}).fetchall()
 
         return [
             {
@@ -1588,7 +1609,7 @@ async def get_case_uncovered_stories(
                   SELECT 1 FROM rdm_testcase t WHERE t.story_key = i.issue_key
               )
             ORDER BY i.created ASC
-        """), {"sprint_id": sprint_id}).fetchall()
+        """), {"sprint_id": _sid(sprint_id)}).fetchall()
 
         return [
             {
@@ -1638,7 +1659,7 @@ async def get_worktime_mismatch(
             SELECT SUM(plan_worktime), SUM(actual_worktime)
             FROM rdm_issue
             WHERE sprint_id = :sprint_id
-        """), {"sprint_id": sprint_id}).fetchone()
+        """), {"sprint_id": _sid(sprint_id)}).fetchone()
 
         rows = session.execute(text("""
             SELECT
@@ -1657,7 +1678,7 @@ async def get_worktime_mismatch(
             -- 要动手改的通常是最上面(多报)与最下面(漏填)那几条。
             -- ⚠ 二级键必须给:差额相同的行若顺序不定,两次打开弹窗行序会变,看起来像数据在动。
             ORDER BY (COALESCE(actual_worktime, 0) - COALESCE(plan_worktime, 0)) DESC, issue_key
-        """), {"sprint_id": sprint_id}).fetchall()
+        """), {"sprint_id": _sid(sprint_id)}).fetchall()
 
     # ⚠ 一律 float():这两列在 MySQL 里是 FLOAT,SQLAlchemy 可能回 Decimal,
     #   而 Decimal 与 float 混算会抛 TypeError、FastAPI 也无法直接序列化 Decimal。
