@@ -365,7 +365,6 @@ watch(() => props.visible, (val) => {
     @update:visible="emit('update:visible', $event)"
   >
     <div class="flex flex-col gap-4">
-      <Message severity="info" :closable="false">请选择任务类型、项目（报表数据需额外选择 Sprint，可多选，将按顺序依次执行）</Message>
       <div class="flex flex-col gap-2">
         <label class="ds-meta" for="manual-task-type">任务类型 *</label>
         <Select
