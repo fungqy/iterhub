@@ -50,6 +50,13 @@ data:
             proxy_set_header X-Forwarded-Proto $scheme;
             proxy_cache_bypass $http_upgrade;
             client_max_body_size 400m;
+            # ⚠ 关闭请求体缓冲。默认(on)下 nginx 会先把整个请求体落盘到 client_body_temp 再转发,
+            #   于是每传一次 297MB 的源表,代理侧就多写一份 297MB(后端 _spool_upload 那份仍然存在),
+            #   有磁盘配额时会把容器的 ephemeral-storage 顶爆。关闭后请求体边收边转发、不再落盘,
+            #   且 Content-Length 原样透传 —— 后端 _reject_oversize_upload 仍能在读 body 前拦超限。
+            # ⚠ 响应侧的 proxy_buffering 保持默认 on:响应是 JSON/静态资源,关掉只会让前端变慢。
+            # ⚠ 本段同样受「与 frontend/nginx.conf 逐字同步」约束,别只改一边。
+            proxy_request_buffering off;
             # API 侧只返回 JSON,无需页面的样式/图片来源白名单,故 CSP 收紧为 default-src 'self'
             # (与 frontend/nginx.conf 逐字一致)
             add_header X-Content-Type-Options "nosniff" always;
@@ -91,13 +98,22 @@ spec:
         - name: nginx-config
           mountPath: /etc/nginx/conf.d/default.conf
           subPath: default.conf
+        # nginx 的临时目录默认落在容器可写层,而可写层计入容器的 ephemeral-storage;
+        # 把它挪到一块**带上限**的 emptyDir 上,避免「一次异常缓冲 = 整个 Pod 被驱逐」。
+        # ⚠ 正常上传不再经过这里:proxy_request_buffering 已在上面 ConfigMap 里关掉,
+        #   这块盘是兜底上限(路径取 nginx 镜像的默认缓存目录,换基础镜像时要跟着改)。
+        - name: nginx-cache
+          mountPath: /var/cache/nginx
         resources:
           requests:
             cpu: "100m"
             memory: "128Mi"
+            # nginx 本体只吃几十 MB,CPU/内存维持原值——真正需要设限的是磁盘(见上)
+            ephemeral-storage: "256Mi"
           limits:
             cpu: "500m"
             memory: "512Mi"
+            ephemeral-storage: "2Gi"
       - name: iterhub-service
         image: harbor.zvos.zoomlion.com/embodied/iterhub-service:latest
         imagePullPolicy: IfNotPresent
@@ -123,6 +139,17 @@ spec:
         #    在 nginx 放行之后被后端 413 挡回,现象和"文件损坏"一模一样。
         - name: MAX_UPLOAD_BYTES
           value: "419430400"
+        # ⚠ startupProbe:启动期要 import pandas/numpy(holidays)与 openpyxl(data_import 模块级),
+        #    还要建默认账号、起调度器,慢节点上可能超过 liveness 的 30s 初值就判定失败 ——
+        #    于是容器被杀掉重启,启动永远追不上判死。startupProbe 生效期间 liveness/readiness
+        #    都不执行,这里给足 150s(5s × 30);一旦通过就交回下面两个探针。
+        startupProbe:
+          httpGet:
+            path: /livez
+            port: 8000
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 30
         # ⚠ liveness 必须探 /livez(只证明进程活着),**不能**探 /health:
         #    /health 会在 MySQL/调度器不可用时返回 503,而 livenessProbe 失败
         #    会让 kubelet 杀掉并重启容器 —— 数据库抖动会被放大成容器反复重启
@@ -144,17 +171,34 @@ spec:
           periodSeconds: 5
           timeoutSeconds: 3
           failureThreshold: 3
+        # ⚠ 下面的值是按「文档故障导入」这条主链路定的,不是按普通 CRUD:
+        #   1) 内存:进程基线本就不低(启动即拉起 pandas+numpy,openpyxl 模块级 import),
+        #      导入时 PIL 单张解码还受 doc_bug_images.MAX_THUMB_PIXELS(40MP)约束 ——
+        #      RGBA 解码约 160MB,加中间态与 WebP 编码缓冲,单张最坏瞬时 300-400MB,
+        #      两人同时导入即叠加;旧上限 1Gi 离 OOMKill 只差一次并发,
+        #      而 OOM 重启会连带丢掉进程内 APScheduler 状态。
+        #   2) CPU:导入是纯 CPU 密集(openpyxl 持 GIL + 390 张图 PIL 解码 + WebP method=4),
+        #      旧的 1000m 会被 CFS 限流 ⇒ 导入从「数十秒」拖成数分钟,同期接口一起变慢。
+        #   3) ephemeral-storage:每次上传都在 /tmp 落一份 297MB 临时文件(_spool_upload),
+        #      旧配置完全没设限,只能等节点 DiskPressure 来驱逐;2Gi ≈ 容忍 6 份并发上传。
         resources:
           requests:
-            cpu: "200m"
-            memory: "256Mi"
+            cpu: "500m"
+            memory: "512Mi"
+            ephemeral-storage: "512Mi"
           limits:
-            cpu: "1000m"
-            memory: "1Gi"
+            cpu: "2000m"
+            memory: "2Gi"
+            ephemeral-storage: "2Gi"
       volumes:
       - name: nginx-config
         configMap:
           name: iterhub-nginx-config
+      # 前端容器的 nginx 临时目录(见上面的 volumeMounts):挂 emptyDir 并加上限,
+      # 免得「一次异常缓冲」直接打爆可写层(可写层计入 ephemeral-storage)
+      - name: nginx-cache
+        emptyDir:
+          sizeLimit: 2Gi
 
 ---
 apiVersion: v1
