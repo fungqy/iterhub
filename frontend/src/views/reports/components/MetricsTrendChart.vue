@@ -7,29 +7,27 @@ import { tooltipFormatter, type CoreChartSeries, type EChartAxisLabelParam } fro
 import { chartChrome } from './chartPalette'
 import { useTheme } from '@/composables/useTheme'
 
-// 通用「柱 + 线」趋势图卡片,不感知具体业务,由父组件传入数据并决定点击行为
+// 通用「柱 + 线」趋势图卡片,不感知具体业务 —— 只负责把父组件给的数据画出来。
+//
+// ⚠ 2026-09-21:本组件原先自带下钻(clickable 时点柱子 emit cell-click:
+//   故事数→燃尽图、故障数→故障分布、时长→明细),现已移除。下钻入口统一收口到
+//   「Sprint 概览」弹窗里的同名指标卡(见 SprintSummaryDialog.vue),质量报表页上
+//   这三张趋势图只呈现趋势、不再可点。随之删掉的还有 clickable prop、cell-click
+//   事件,以及标题旁的 hint 小字(「| 点击查看…」—— 它唯一的用途就是提示可点)。
+//   要恢复某张图的下钻,不是把 @cell-click 接回去就行:父组件还必须决定弹哪个窗,
+//   那正是这次要去掉的重复入口。
 const props = withDefaults(defineProps<{
   title: string
   legendItems: Array<{ name: string; color: string }>
   xData: string[]
   series: CoreChartSeries[]
-  /** 是否为纯柱图且无需点击(如故事数) */
-  clickable?: boolean
   loading?: boolean
-  /** 可选提示小字(标题旁),如「点击查看...」;无则不显示 */
-  hint?: string
   /** 时间单位轴标签格式化串,如 '{value}h'(故障平均时长图用) */
   yAxisFormatter?: string
 }>(), {
-  clickable: false,
   loading: false,
-  hint: undefined,
   yAxisFormatter: undefined,
 })
-
-const emit = defineEmits<{
-  (e: 'cell-click', data: unknown, dataIndex?: number): void
-}>()
 
 // 外框色(轴标签/tooltip)随主题变化,须在 isDark 变化时重绘
 const { isDark } = useTheme()
@@ -87,13 +85,6 @@ function render() {
   }
   // 组件系列为扁平 CoreChartSeries[],与 ECharts 强类型不完全对齐,放宽断言后交给 ECharts 运行时解析
   chartInstance.setOption(buildOption() as echarts.EChartsCoreOption)
-  // 单元格点击上抛,由父组件决定打开哪个弹窗
-  chartInstance.off('click')
-  if (props.clickable) {
-    chartInstance.on('click', (params) => {
-      emit('cell-click', params.data, params.dataIndex)
-    })
-  }
   nextTick(() => {
     chartInstance?.resize()
   })
@@ -155,7 +146,6 @@ defineExpose({ resize: handleResize })
           ></span>
           {{ item.name }}
         </span>
-        <span v-if="hint" class="ds-meta">{{ hint }}</span>
       </div>
     </template>
     <template #content>
@@ -175,7 +165,11 @@ defineExpose({ resize: handleResize })
              的 .ds-card .p-card-body padding 与 .ds-card .p-card-title),不为单个页面破例。
              故卡盒实测 356.5 → 304(降 14.7%),而不是跟着也降五分之一。
              只改这一处 —— grid 的 top/bottom 是百分比,会跟着容器等比缩放。 -->
-        <div ref="chartRef" class="w-full h-[210px]"></div>
+        <!-- ds-chart-static:本图已不可点(见 script 顶部说明),该类把光标钉回箭头。
+             ⚠ 不挂它的话,鼠标移到柱子 / 折线 / 面积上仍是手型 —— 那是 zrender 图元的
+                默认 cursor='pointer',不是我们写的样式(成因见 components.scss 该规则处)。
+                日后若恢复下钻,记得把这类摘掉。 -->
+        <div ref="chartRef" class="ds-chart-static w-full h-[210px]"></div>
         <div v-if="xData.length === 0 && !loading" class="flex flex-col items-center gap-2 py-4 ds-meta">暂无数据</div>
       </div>
     </template>

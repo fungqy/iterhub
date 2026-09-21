@@ -170,7 +170,9 @@ onBeforeUnmount(teardown)
           <span>{{ burndown.start_date }} ~ {{ burndown.end_date }}</span>
           <span>故事总数 {{ burndown.total }} 个</span>
         </p>
-        <div v-if="burndown.dates.length > 0" ref="chartRef" class="w-full h-[460px]"></div>
+        <!-- ds-chart-static:燃尽图同样只读(无任何点击),把光标钉回箭头 ——
+             否则 zrender 图元默认 cursor='pointer',悬停折线仍变手型(成因见 components.scss)。 -->
+        <div v-if="burndown.dates.length > 0" ref="chartRef" class="ds-chart-static w-full h-[460px]"></div>
         <div v-else class="ds-empty">暂无燃尽数据</div>
       </template>
       <div v-else class="ds-empty">暂无燃尽数据</div>

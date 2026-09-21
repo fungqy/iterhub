@@ -238,14 +238,36 @@
   grid-template-columns: repeat(auto-fit, minmax(min(400px, 100%), 1fr));
 }
 
-// 趋势图卡(MetricsTrendChart)副标题:图例项与右侧「| 点击查看…」提示是同一排的两类小字,
+// 趋势图卡(MetricsTrendChart)副标题:图例项与右侧提示小字曾是同一排的两类小字,
 // 字号必须一致 —— Aura 的 card.subtitle 段只定义了 color、没定义 font-size,
-// 于是图例项继承根字号 16px,而提示是 .ds-meta(0.875rem/14px),同排出现两档字号。
-// 整条副标题统一到 0.875rem 后,两者相等(提示项自身的 .ds-meta 也是这个值,不冲突)。
+// 于是图例项继承根字号 16px,提示是 .ds-meta(0.875rem/14px),同排出现两档字号。
+// 整条副标题统一到 0.875rem 后两者相等。
+// ⚠ 2026-09-21:「| 点击查看…」提示已随趋势图下钻一起删除(见 MetricsTrendChart),
+//   现只剩图例项;这条字号规则仍要留着 —— 图例项本身不是 .ds-meta,不靠它就会是 16px。
 // ⚠ 作用域限定在趋势图卡:Jobs 页 ManualExecutePanel 的副标题是单独的提示文案,
 //   不属本次需求,挂到 .ds-card 上会把它一起改掉。
 .ds-card.ds-trend-card .p-card-subtitle {
   font-size: 0.875rem;
+}
+
+/* ── 只读图表:把光标钉回箭头(.ds-chart-static)─────────────────────
+   解决的问题(用户 2026-09-21):趋势图去掉下钻后,鼠标移到柱子 / 折线上依旧变手型,
+   与「点不了」自相矛盾。这不是我们的样式写错了,而是 zrender 的默认值:
+     · Displayable 的原型上 cursor = 'pointer'(zrender/lib/graphic/Displayable.js);
+     · Handler 在 mousemove 时执行 proxy.setCursor(hoveredTarget.cursor),
+       没有命中图元才回落 'default'(zrender/lib/Handler.js);
+     · HandlerDomProxy.setCursor 把结果写成**行内** style.cursor(…/dom/HandlerProxy.js)。
+   即:只要绑没绑 click,任何图元(柱子 / 折线 / 折线下的面积 / 轴标签)悬停都会变手型。
+   ⚠ 必须 !important:zrender 写的是行内样式,普通规则压不过它。
+   ⚠ 选择器要覆盖**子树**而不只是宿主自身:拿到行内 cursor 的是 zrender 自己建的视口节点
+     (painter.getViewportRoot(),canvas 渲染器下是一个内层 div),它是宿主 div 的子节点;
+     宿主自身写 default 只会被那个子节点的行内样式盖过去。用 `*` 而不是 `> *`,
+     是为了不依赖 ECharts 内部 DOM 结构(渲染器 / 版本变化时结构可能变)。
+   ⚠ 消费方目前只有 MetricsTrendChart(质量报表页三张趋势图)。给某张图恢复下钻时,
+     把 .ds-chart-static 从它的宿主上摘掉即可 —— 别删这条规则,别处还在用。 */
+.ds-chart-static,
+.ds-chart-static * {
+  cursor: default !important;
 }
 
 // 主按钮:白字对品牌绿 primary-500 仅 1.6:1,不可读;底色加深到 primary-700。
@@ -1545,9 +1567,10 @@
   color: var(--ih-ink-muted);
 }
 
-/* ── is-clickable:整卡可下钻。概览弹窗里现有 5 张:团队成员(→ 成员明细)、
-   故障数(→ 故障分布统计)、故障平均解决时长(→ 时长明细)、计划外故事占比(→ 故事列表)、
-   工时(→ 工时不一致明细;**只有投入 > 计划时**才是可点的,其余情况该卡退回 div)。──
+/* ── is-clickable:整卡可下钻。概览弹窗里现有 6 张:故事数(→ 燃尽图)、
+   团队成员(→ 成员明细)、故障数(→ 故障分布统计)、故障平均解决时长(→ 时长明细)、
+   计划外故事占比(→ 故事列表)、工时(→ 工时不一致明细;**只有投入 > 计划时**
+   才是可点的,其余情况该卡退回 div)。──
    卡片渲染成 <button> 以保证 Tab/Enter 原生可用,故必须清零 UA 外观。
    最要紧的一条是 text-align —— 按钮默认居中,而 .ds-metric 的子元素都是 flex item,
    不清零会把数值与副标题顶到格心;font 也必须 inherit,否则按钮退回系统 UI 字体,
@@ -1556,7 +1579,7 @@
    ⚠ 不要在这里补 width:100% —— 项目没有全局 box-sizing:border-box,
      卡片在网格里靠 justify-self:stretch 撑满整格,再显式给 width 会让边框盒
      = 格宽 + 左右 padding,直接溢出到相邻列。 */
-button.ds-metric {
+   button.ds-metric {
   margin: 0;
   font: inherit;
   color: inherit;
@@ -1602,6 +1625,24 @@ button.ds-metric {
 .ds-metric.is-clickable:focus-visible {
   outline: 2px solid var(--ih-accent);
   outline-offset: 2px;
+}
+
+/* ── is-hero 同时 is-clickable(概览里的「故事数」→ 燃尽图,2026-09-21 起)──
+   上面那条 `.is-clickable:hover` 的浅底会盖掉 hero 的渐变(同特异性 0,3,0,且它写在
+   `.ds-metric.is-hero` 之后) —— 结果是渐变底被换成近白底,而 hero 的反白文字
+   (--ih-on-accent,由 `.ds-metric.is-hero .ds-metric-*` 给出)并不跟着变,
+   悬停当下就成了白底白字。故「hero + 可点」的悬停必须**单独口径化**:
+   底色与透明描边都不动,只用亮度表达可点(下面那条 0,4,0 稳压 :hover 那条)。
+   过渡也随之改写:hero 的底是渐变(background-color 过渡对其无效),
+   真正在变的是 filter,把它单独接上,才与相邻卡 0.15s 的节奏一致。 */
+.ds-metric.is-hero.is-clickable {
+  transition: filter 0.15s;
+}
+
+.ds-metric.is-hero.is-clickable:hover {
+  background: var(--ih-grad-total);
+  border-color: transparent;
+  filter: brightness(1.06);
 }
 
 /* ── 弹窗尺寸四档 ── */

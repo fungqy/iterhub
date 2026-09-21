@@ -77,16 +77,15 @@ function openBugDetailBySprint(sprintId: unknown) {
   bugDialogVisible.value = true
 }
 
-// ── 故事数:点击柱子打开对应 Sprint 的故事燃尽图 ──
+// ── 故事数:故事燃尽图 ──
+// 入口唯一在「Sprint 概览」弹窗的「故事数」卡(见 SprintSummaryDialog 的 open-burndown)。
+// 页面上的趋势图不再可点:图上一根柱子只说「这个迭代有几个故事」,而燃尽曲线与迭代
+// 是一对一的 —— 从概览进入,「正在看哪个迭代」不存在歧义。
 const burndownDialogVisible = ref(false)
 
-function onStoryCellClick(data: unknown) {
-  // 数据点携带 sprintId(常规/放大视图通用),据此打开对应 Sprint 的燃尽图
-  const d = data as { sprintId: number; value: number } | null | undefined
-  if (d && d.sprintId) {
-    setActiveSprint(d.sprintId)
-    burndownDialogVisible.value = true
-  }
+function openBurndown(sprintId: unknown) {
+  setActiveSprint(sprintId)
+  burndownDialogVisible.value = true
 }
 
 function handleChartsResize() {
@@ -113,15 +112,14 @@ async function loadProjectMetrics(projectId: number) {
 // —— 后者只是「Sprint1」这类缩写,同一项目内会撞名(如 EMBODIED-Sprint1 与
 // botadp-Sprint-1 都缩成 Sprint1),横轴上无法区分;且前端所有展示 Sprint 名称的
 // 位置口径保持一致,避免同一迭代在不同界面显示成两个名字。
-// series 装配函数按传入的 metrics 列表构建,常规(最近7个)与放大(全量)视图共用
+// series 装配函数按传入的 metrics 列表构建
 //
-// 注意:接口返回的 sprint_id 实际是**字符串**(如 "7551")。数据点携带它的目的是
-// "点这个柱子 ⇒ 下钻到这个 Sprint",因此这里转成 number —— 后续所有下钻入口
-// (setActiveSprint)对传入值都会再归一化一次,多转一次无害,但能让数据点的语义
-// 自洽(不要指望下游替上游擦屁股)。
+// 数据点统一用 { value } 形态(而不是裸数字),label / tooltip 回调按对象取值即可。
+// ⚠ 这三个函数原先还在数据点上挂了 sprintId,供「点柱子 ⇒ 下钻到该 Sprint」用;
+//   下钻已收口到「Sprint 概览」的指标卡(见文件上方「下钻:入口一律在卡 / 表上」),
+//   数据点不再需要携带任何下钻信息 —— 图与 sprintId 自此无关,别再把两者绑回去。
 function storySeriesOf(metrics: SprintMetricsItem[]): CoreChartSeries[] {
-  // 数据点携带 sprintId 供点击打开燃尽图
-  const yData = metrics.map(s => ({ value: s.story_count, sprintId: Number(s.sprint_id) }))
+  const yData = metrics.map(s => ({ value: s.story_count }))
   return [
     {
       name: '故事数',
@@ -143,7 +141,7 @@ function storySeriesOf(metrics: SprintMetricsItem[]): CoreChartSeries[] {
 }
 
 function bugSeriesOf(metrics: SprintMetricsItem[]): CoreChartSeries[] {
-  const yData = metrics.map(s => ({ value: s.bug_count, sprintId: Number(s.sprint_id) }))
+  const yData = metrics.map(s => ({ value: s.bug_count }))
   return [
     {
       name: '故障趋势',
@@ -165,9 +163,9 @@ function bugSeriesOf(metrics: SprintMetricsItem[]): CoreChartSeries[] {
 }
 
 function timeSeriesOf(metrics: SprintMetricsItem[]): CoreChartSeries[] {
-  // 平均时长由秒换算为天,保留一位小数;数据点携带 sprintId 供点击跳转
-  const devData = metrics.map(s => ({ value: s.avg_dev_seconds > 0 ? parseFloat((s.avg_dev_seconds / 86400).toFixed(1)) : 0, sprintId: Number(s.sprint_id) }))
-  const testData = metrics.map(s => ({ value: s.avg_test_seconds > 0 ? parseFloat((s.avg_test_seconds / 86400).toFixed(1)) : 0, sprintId: Number(s.sprint_id) }))
+  // 平均时长由秒换算为天,保留一位小数
+  const devData = metrics.map(s => ({ value: s.avg_dev_seconds > 0 ? parseFloat((s.avg_dev_seconds / 86400).toFixed(1)) : 0 }))
+  const testData = metrics.map(s => ({ value: s.avg_test_seconds > 0 ? parseFloat((s.avg_test_seconds / 86400).toFixed(1)) : 0 }))
   // 面积折线渐变:透明度随 y 递减,使时长趋势更直观(实现见 chartPalette.ts)
   return [
     {
@@ -198,22 +196,20 @@ const storySeries = computed(() => storySeriesOf(metricsLatest.value))
 const bugSeries = computed(() => bugSeriesOf(metricsLatest.value))
 const timeSeries = computed(() => timeSeriesOf(metricsLatest.value))
 
+// ── 下钻:入口一律在「卡 / 表」上,趋势图不再可点 ────────────────────
+// 三张趋势图(故事数 / 故障数 / 故障平均解决时长)已改为纯展示;对应的下钻统一由
+// SprintSummaryDialog 的同名指标卡派发(见模板里那几行 @open-*):
+//   故事数卡 → 故事燃尽图(BurndownDialog)         ← openBurndown
+//   故障数卡 → 故障分布统计(BugDetailDialog)       ← openBugDetailBySprint
+//   故障平均解决时长卡 → 时长明细(AvgTimeDevelopersDialog) ← openAvgTimeDevelopers
+// 「故障重开数」本就是表格,入口在表内(见下方注释)。
+
 // ── 故障重开数:已由趋势图改为分布表 ─────────────────────────────
 // 原来这里装配的是「柱 + 线」的 reopenSeries(字段 bug_reopen_count)。换掉的理由是那条
 // 图只能表达「有几只故障被重开过」,重开 1 次与 5 次在图上都是 +1;表格才能把次数拆开。
 // 数据仍是同一批 metricsLatest(与其余三张图同窗),只是字段换成 reopen_once/twice/many
 // —— 后端就是由同一个分组查询派生 bug_reopen_count 的,故表格「合计」= 原来图上那个值。
 // 下钻沿用 ReportReopenDialog:点行(或「合计」数字)打开该 Sprint 的重开明细。
-
-// 图表单元格点击由子组件上抛(故事数→燃尽图、故障数→分布、时长→明细);
-// 重开数已改表格,走 ReopenDistributionCard 的 select 事件 ——
-// 事件带档位(点哪一格看哪一档,点「合计」/整行 = 'all'),父组件只负责把它转交给弹窗。
-function onBugCellClick(data: unknown) {
-  const d = data as { sprintId: number; value: number } | null | undefined
-  if (d && d.value > 0) {
-    openBugDetailBySprint(d.sprintId)
-  }
-}
 
 const reopenDialogVisible = ref(false)
 const reopenBugs = ref<ReopenBugItem[]>([])
@@ -239,18 +235,10 @@ async function openReopenBySprint(sprintId: unknown, bucket: ReopenBucket = 'all
   }
 }
 
-// ── 故障平均时长:点击柱子打开对应 Sprint 各开发人员的时长明细 ──
+// ── 故障平均时长:打开对应 Sprint 各开发人员的时长明细 ──
 const avgTimeDialogVisible = ref(false)
 const avgTimeDevelopers = ref<AvgTimeDeveloperItem[]>([])
 const loadingAvgTimeDevelopers = ref(false)
-
-function onTimeCellClick(data: unknown) {
-  // 数据点携带 sprintId,据此打开对应 Sprint 的时长明细
-  const d = data as { sprintId: number; value: number } | null | undefined
-  if (d && d.sprintId) {
-    openAvgTimeDevelopers(d.sprintId)
-  }
-}
 
 async function openAvgTimeDevelopers(sprintId: unknown) {
   const sid = setActiveSprint(sprintId)
@@ -647,28 +635,25 @@ onMounted(() => {
       <p v-else-if="!loadingSprintTimeline" class="ds-meta">暂无已激活的 Sprint</p>
     </div>
 
+    <!-- 三张趋势图**纯展示、不可点**(2026-09-21 用户要求)。原先点柱子分别打开
+         燃尽图 / 故障分布 / 时长明细,与「Sprint 概览」弹窗里的同名指标卡是两条
+         重复入口;现在只留概览那一处(见下方 SprintSummaryDialog 的 @open-*)。 -->
     <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
       <MetricsTrendChart
         ref="storyChartRef"
         title="故事数"
-        hint=" | 点击查看燃尽图"
         :legend-items="[{ name: '故事数 (个)', color: CHART.series1 }]"
         :x-data="metricsXData"
         :series="storySeries"
         :loading="loadingProjectMetrics"
-        clickable
-        @cell-click="onStoryCellClick"
       />
       <MetricsTrendChart
         ref="bugChartRef"
         title="故障数"
-        hint=" | 点击查看分布"
         :legend-items="[{ name: '故障数 (个)', color: CHART.series2 }]"
         :x-data="metricsXData"
         :series="bugSeries"
         :loading="loadingProjectMetrics"
-        clickable
-        @cell-click="onBugCellClick"
       />
       <!-- 故障重开数:表格而非趋势图。列的三个档位(1 次 / 2 次 / 多次)由后端按
            每只故障的重开次数分桶给出;点某一格的数字 → 弹窗只列该档的故障,
@@ -681,14 +666,11 @@ onMounted(() => {
       <MetricsTrendChart
         ref="timeChartRef"
         title="故障平均解决时长"
-        hint=" | 点击查看明细"
         :legend-items="[{ name: '开发时长 (天)', color: CHART.series4 }, { name: '测试时长 (天)', color: CHART.series2 }]"
         :x-data="metricsXData"
         :series="timeSeries"
         :loading="loadingProjectMetrics"
         y-axis-formatter="{value}d"
-        clickable
-        @cell-click="onTimeCellClick"
       />
     </div>
 
@@ -716,9 +698,12 @@ onMounted(() => {
       :loading="loadingAvgTimeDevelopers"
     />
 
-    <!-- Sprint Summary Dialog（时间轴点位点击）-->
+    <!-- Sprint Summary Dialog(时间轴点位点击)—— 以下三种下钻的**唯一入口**:
+         故事数 → 燃尽图、故障数 → 故障分布、故障平均解决时长 → 时长明细。
+         质量报表页上的对应趋势图已不再可点(见上方趋势图区域的注释)。 -->
     <SprintSummaryDialog
       v-model:visible="summaryDialogVisible"
+      @open-burndown="openBurndown"
       @open-bug-detail="openBugDetailBySprint"
       @open-avg-time="openAvgTimeDevelopers"
       @open-unplanned-stories="openUnplannedStories"

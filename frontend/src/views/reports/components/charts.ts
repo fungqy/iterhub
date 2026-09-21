@@ -75,7 +75,11 @@ export const DEVELOPER_COLORS = [
 
 // ── 通用趋势图系列定义 ──────────────────────────────────────────
 // 一个数据类型可能同时有 bar + line 两个 series
-export type ChartSeriesData = number | { value: number; sprintId: number }
+// ⚠ 对象分支只保留 value:ECharts 的数据点本可挂任意自定义字段,此前这里挂过
+//   sprintId(供「点柱子下钻」)。下钻已收口到「Sprint 概览」的指标卡
+//   (见 Reports.vue),图表不再承载任何下钻信息,故把该字段从类型里一并去掉 ——
+//   留着会让「数据点还能带业务字段」这个错觉继续扩散。
+export type ChartSeriesData = number | { value: number }
 
 export interface CoreChartSeries {
   name: string

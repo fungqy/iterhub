@@ -16,7 +16,7 @@ const METRIC_HELP: Record<string, string> = {
   member: '参与本次迭代的成员数量。\n\n点击可查看每个成员的 任务数 / 故障数。',
   range: '本次迭代的实际跨度天数(激活日 → 完成日)。',
   worktime: '计划工时与投入工时的对比。\n\n投入大于计划时，点击可查看计划与投入不一致的条目。',
-  story: '本次迭代的故事数量。',
+  story: '本次迭代的故事数量。\n\n点击可查看该迭代的故事燃尽图。',
   doneRate: '已完成故事(含待验收)占故事总数的比例。',
   task: '本次迭代的子任务数量。',
   bug: '本次迭代的故障数量。',
@@ -41,8 +41,10 @@ const METRIC_HELP: Record<string, string> = {
 //    其中「用例数 / 故事」在故事数为 0(没有分母)时仍退回「—」。
 //    用例覆盖率同源,故事数为 0 时整卡走预留态。
 // 3. 卡片顺序:投入规模(人/时长/工时)→ 产出(故事/任务/用例)→ 质量(故障/重开/时长)。
-// 4. 「故障数」卡可下钻:概览只给总量,分布与明细交给父级既有的「故障分布统计」弹窗。
-//    本组件不持有那个弹窗,只把意图 emit 上去(见 openBugDetail)。
+// 4. 可下钻的卡一律把意图 emit 给父级,本组件不持有任何弹窗(同一个弹窗挂两份实例会
+//    出现两套互不相干的加载状态)。2026-09-21 起这里是「故事数 / 故障数 / 故障平均
+//    解决时长」三种下钻的**唯一入口** —— 质量报表页上那三张同名趋势图已改为纯展示
+//    (见 Reports.vue),别再让图也能点。
 const props = defineProps<{
   visible: boolean
 }>()
@@ -53,6 +55,8 @@ const sprintId = computed(() => sprintScope?.value ?? null)
 
 const emit = defineEmits<{
   'update:visible': [value: boolean]
+  /** 请求打开「故事燃尽图」弹窗(由父级复用既有 BurndownDialog) */
+  'open-burndown': [sprintId: number]
   /** 请求打开「故障分布统计」弹窗(由父级复用既有 BugDetailDialog) */
   'open-bug-detail': [sprintId: number]
   /** 请求打开「故障平均解决时长(工作日口径)」弹窗(由父级复用既有 AvgTimeDevelopersDialog) */
@@ -257,6 +261,16 @@ function ringStyle(rate: number | null) {
 // 而不是自己在 scope 里读一遍再递)。父级收到后会用同一个值覆盖下钻上下文
 // (见 Reports.vue 的 setActiveSprint)—— 于是"页面上正在下钻哪个 Sprint"
 // 始终有一个明确的写入者,而不是靠两边各读一次、碰巧一致。
+/** 故事数卡 → 「故事燃尽图」弹窗(父级复用 BurndownDialog)。
+ *  与 openBugDetail 同构:本组件不持有弹窗,只递意图上去;
+ *  无故事(story_count 为 0)时不下钻 —— 那时卡片退回 div,本就不是可点控件,
+ *  点开也只会看到「暂无燃尽数据」。
+ *  ⚠ 判据必须与卡片能否渲染成 button 完全同源(都以 story_count > 0 为准)。 */
+function openBurndown() {
+  const s = summary.value
+  if (s && s.story_count > 0) emit('open-burndown', s.sprint_id)
+}
+
 /** 故障数卡 → 「故障分布统计」弹窗。
  *  弹窗本身由父级复用既有的 BugDetailDialog ——
  *  若在本组件内再挂一个实例,同一个弹窗就会有两份互不相干的加载状态。
@@ -436,14 +450,27 @@ function openWorktimeMismatch() {
           <span v-else-if="worktimeFullyReserved" class="ds-metric-badge">待同步</span>
         </component>
 
-        <!-- 故事数:全弹窗唯一的强调卡(渐变底) -->
-        <div class="ds-metric is-hero">
+        <!-- 故事数:全弹窗唯一的强调卡(渐变底),同时是「故事燃尽图」的下钻入口。
+             有故事(story_count > 0)时才渲染成 button;为 0 时退回 div —— 没有可烧的
+             曲线,留个可点却空转的控件只会误导(判据与 openBurndown 同源)。
+             ⚠ 它是弹窗里唯一一颗 is-hero,而 .is-clickable 的悬停样式会把渐变底换成
+                浅底、让反白字消失 —— 该组合由 components.scss 的
+                `.ds-metric.is-hero.is-clickable:hover` 单独接管,别删那条规则。 -->
+        <component
+          :is="summary.story_count > 0 ? 'button' : 'div'"
+          v-bind="summary.story_count > 0 ? { type: 'button' } : {}"
+          class="ds-metric is-hero"
+          :class="summary.story_count > 0 ? 'is-clickable' : ''"
+          @click="openBurndown"
+        >
           <span class="ds-metric-label">故事数<MetricHelp :help="METRIC_HELP.story" /></span>
           <span class="ds-metric-value">
             {{ summary.story_count }}<span class="ds-metric-unit">个</span>
           </span>
-          <span class="ds-metric-sub">{{ storyDoneSub }}</span>
-        </div>
+          <span class="ds-metric-sub">
+            {{ storyDoneSub }}<template v-if="summary.story_count > 0"> · 点击查看燃尽图</template>
+          </span>
+        </component>
 
         <!-- 故事完成率:进度环 -->
         <div class="ds-metric is-ring" :class="doneRateTone">
