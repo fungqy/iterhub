@@ -416,7 +416,7 @@ watch(() => props.visible, (val) => {
               <Tag v-if="option.hasData" severity="success" value="已有数据" />
             </div>
           </template>
-          <!-- 覆盖 PrimeVue 默认的 "No available options":加载中与确实无数据必须能区分开 -->
+          <!-- 覆盖 primevueLocale.ts 的全局空态文案:加载中与确实无数据必须能区分开 -->
           <template #empty>
             <span>{{ sprintLoading ? '正在加载迭代列表…' : '暂无可选迭代' }}</span>
           </template>

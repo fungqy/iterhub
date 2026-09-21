@@ -14,7 +14,7 @@ logger = logging.getLogger("Jira")
 #
 # 这两条路径都是「用户在等」的同步请求:RDM 不可达时必须尽快回退本地库 / 报错,
 # 不能沿用默认的 60s × 3 次 + 每轮 2s 退避(那是给后台定时任务用的)。
-# 前端在这段时间里 options 为空,PrimeVue Select 会直接渲染 "No available options"。
+# 前端在这段时间里 options 为空,下拉框会渲染空态文案(前端 primevueLocale.ts 统一为「暂无可选项」)。
 INTERACTIVE_SPRINT_TIMEOUT = 5
 INTERACTIVE_SPRINT_RETRIES = 0
 

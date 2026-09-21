@@ -14,6 +14,7 @@ import router from "./router";
 import { useAuthStore } from "@/stores/auth";
 import { notify } from "@/utils/appToast";
 import { initTheme } from "@/composables/useTheme";
+import { primevueLocale } from "@/constants/primevueLocale";
 
 // 基于 Aura 预设定制品牌绿主题(精确匹配 --accent: #aadb1e)
 // 注意:--ih-brand(tokens.scss)须与下方 primary 500 系列同源,改一处必须同步另一处。
@@ -42,6 +43,9 @@ const pinia = createPinia();
 app.use(pinia);
 app.use(router);
 app.use(PrimeVue, {
+    // 中文文案全局注入:此前未配置 locale 时,PrimeVue 会在下拉框无选项等处
+    // 直接渲染内置英文(如 "No available options")。定义见 constants/primevueLocale.ts。
+    locale: primevueLocale,
     theme: {
         preset: IterhubPreset,
         options: {
