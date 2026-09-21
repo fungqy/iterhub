@@ -4,7 +4,8 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        - VITE_API_HOST=http://localhost:8008
+        # ⚠ 只传 VITE_BASE。VITE_API_HOST 已删除:它对构建产物无效(见 frontend/Dockerfile),
+        #   前端 api 基址恒为 VITE_BASE + 'api',由 nginx 的 /iterhub/api 反代到 backend:8000。
         - VITE_BASE=/iterhub/
     container_name: iterhub-frontend
     ports:

@@ -23,10 +23,21 @@ data:
         }
 
         # 文档故障导入的唯一数据源是 297MB 的「应用平台现场问题沟通新.xlsx」
-        # (390 张内嵌现场截图),上限必须与该文件同步抬高,且两处都要:
-        # 外层给静态资源,api location 给上传(nginx 的 add_header 不继承,
-        # client_max_body_size 同理 —— 漏掉里层那个,上传会在代理层被 413 挡掉)。
+        # (390 张内嵌现场截图),须与后端 MAX_UPLOAD_BYTES(400MB)对齐抬高,
+        # 否则超过 nginx 默认 1MB 的上传会在代理层被 413 挡掉。
+        # 注:client_max_body_size 本身**会**继承到各 location,里层那条是冗余保险;
+        #     add_header 才是不继承的那个 —— 这才是安全头必须写两处的原因。
         client_max_body_size 400m;
+
+        # 安全响应头。add_header 的继承规则很反直觉:只要某个 location 里出现
+        # 任何一条 add_header,server 级的这几条就对该 location **整体失效**,
+        # 所以 /iterhub/api 内必须再写一份(见下),否则 API 响应会静默丢掉全部安全头。
+        # ⚠ 本段与 frontend/nginx.conf 必须逐字保持同步:容器镜像用那份,k8s 用这份。
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Frame-Options "SAMEORIGIN" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+        add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'self'; object-src 'none'; base-uri 'self';" always;
 
         location /iterhub/api {
             proxy_pass http://localhost:8000/api;
@@ -39,6 +50,13 @@ data:
             proxy_set_header X-Forwarded-Proto $scheme;
             proxy_cache_bypass $http_upgrade;
             client_max_body_size 400m;
+            # API 侧只返回 JSON,无需页面的样式/图片来源白名单,故 CSP 收紧为 default-src 'self'
+            # (与 frontend/nginx.conf 逐字一致)
+            add_header X-Content-Type-Options "nosniff" always;
+            add_header X-Frame-Options "SAMEORIGIN" always;
+            add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+            add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+            add_header Content-Security-Policy "default-src 'self'";
         }
 
         gzip on;
