@@ -1,6 +1,13 @@
 -- ================================================
 -- 迭代看板数据库初始化脚本
 -- 数据库: iterdb
+--
+-- ⚠ 本文件是**表结构的权威定义**:
+--   - 建新库:先跑 init_db.sql(建库/建用户/授权),再跑本文件;
+--   - 存量库:只执行 sql/migration/ 下尚未应用的增量脚本,**不要**重跑本文件
+--     (已全部改为 IF NOT EXISTS,重跑虽不报错,却会掩盖「脚本与线上结构已漂移」;
+--      该目录为空表示当前没有待应用的增量)。
+--   - 任何改表结构的改动都必须同步更新 sql/migration/ 下对应的增量脚本。
 -- ================================================
 
 use iterdb;
@@ -187,7 +194,7 @@ CREATE TABLE IF NOT EXISTS project_task_logs (
 -- ==================================
 -- iterdb.rdm_issue definition
 
-CREATE TABLE `rdm_issue` (
+CREATE TABLE IF NOT EXISTS `rdm_issue` (
   `issue_id` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'issue_id',
   `sprint_id` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'sprint_id',
   `sprint_name` varchar(512) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'sprint名称',
@@ -228,7 +235,7 @@ CREATE TABLE `rdm_issue` (
 
 -- iterdb.sprint definition
 
-CREATE TABLE `rdm_sprint` (
+CREATE TABLE IF NOT EXISTS `rdm_sprint` (
   `board_id` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '看板id',
   `board_name` varchar(512) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '看板名称',
   `project_id` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '项目id',
@@ -249,7 +256,7 @@ CREATE TABLE `rdm_sprint` (
 
 -- iterdb.bug_flag_class definition
 
-CREATE TABLE `rdm_bug_label_class` (
+CREATE TABLE IF NOT EXISTS `rdm_bug_label_class` (
   `class_id` int DEFAULT NULL COMMENT 'Bug标签分类ID',
   `class_name` varchar(50) DEFAULT NULL COMMENT 'Bug标签分类名称',
   `label` varchar(512) DEFAULT NULL COMMENT 'Bug标签'
@@ -258,7 +265,7 @@ CREATE TABLE `rdm_bug_label_class` (
 
 -- iterdb.bug_changelog definition
 
-CREATE TABLE `rdm_bug_changelog` (
+CREATE TABLE IF NOT EXISTS `rdm_bug_changelog` (
   `log_id` varchar(50) DEFAULT NULL COMMENT '变更日志id',
   `bug_id` varchar(50) DEFAULT NULL COMMENT '故障id',
   `bug_key` varchar(50) DEFAULT NULL COMMENT '故障key',
@@ -283,7 +290,7 @@ CREATE TABLE `rdm_bug_changelog` (
 
 -- iterdb.story_changelog definition
 
-CREATE TABLE `rdm_story_changelog` (
+CREATE TABLE IF NOT EXISTS `rdm_story_changelog` (
   `log_id` varchar(50) DEFAULT NULL COMMENT '日志id',
   `story_id` varchar(50) DEFAULT NULL COMMENT '故事id',
   `story_key` varchar(50) DEFAULT NULL COMMENT '故事key',
@@ -299,7 +306,7 @@ CREATE TABLE `rdm_story_changelog` (
 -- iterdb.rdm_testcase definition
 -- 测试用例由「文档导入」写入,归属 sprint 由用例引用的故事号(【需求】列)反查 rdm_issue 得到
 
-CREATE TABLE `rdm_testcase` (
+CREATE TABLE IF NOT EXISTS `rdm_testcase` (
   `case_id` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '用例issue_id',
   `case_key` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '用例key',
   `case_name` varchar(512) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '用例名称',
@@ -340,7 +347,7 @@ CREATE TABLE `rdm_testcase` (
 --      因此重导同一份文件是幂等的，不会堆重复行。
 --   3. 旧表头的【提出人】(propose)、【处理状态】里没有的【已排期】等差异已随新表口径重写。
 
-CREATE TABLE `rdm_doc_bug` (
+CREATE TABLE IF NOT EXISTS `rdm_doc_bug` (
   `key` varchar(50) NOT NULL COMMENT '编码',  -- 取【自动编号】列（旧表头叫「问题编号」）：m+MMDD+当日流水，全表唯一
   `name` text DEFAULT NULL COMMENT '名称', -- 取【功能点】和【问题详述】列进行拼接，拼接规则：【功能点】>【问题详述】，若【功能点】为空，只取【问题详述】
   `priority` varchar(50) DEFAULT NULL COMMENT '优先级', -- 取【优先级】列原值直通：极高/高/中/低/优化。「优化」是新表原生值，不再只由「低」转换而来（两者落同一个桶）
@@ -437,3 +444,42 @@ CREATE TABLE IF NOT EXISTS rdm_sprint_exclude (
   UNIQUE KEY uk_sprint_exclude_sprint (sprint_id),
   KEY idx_sprint_exclude_project (project_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='不参与前端展示的Sprint屏蔽名单(人工维护)';
+
+
+-- ==================================
+-- WIKI 代码评审
+-- ==================================
+-- iterdb.review_records_details definition
+--
+-- 由 task/report_wiki_data.py 这个**独立脚本**写入(它不在调度器里,需手工执行):
+--   1. 每次运行先 TRUNCATE 本表,再从 Confluence 抓「代码评审」段落、解析附件 xlsx,全量重写;
+--   2. 一行 = 一条评审意见明细(某条评审记录 × xlsx 里的一行),故 project / sprint / title
+--      这些「记录级」字段会在多行之间重复。
+--
+-- 列就是该脚本 DataFrame 的列,**不多不少**:脚本用 to_sql(if_exists="append") 按列名写入,
+-- 本表结构与 parse_record / parse_detail_from_xlsx 的返回字段必须同步改。
+--
+-- ⚠ 补记(2026-09-20):本表此前只存在于线上库,任何建表脚本里都没有 —— 新库首次跑脚本会因
+--   TRUNCATE 报「表不存在」而失败(truncate_table 现已失败即抛,不再静默吞掉)。
+
+CREATE TABLE IF NOT EXISTS `review_records_details` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `project` varchar(255) DEFAULT NULL COMMENT '项目名(取 Confluence 页面名)',
+  `sprint` varchar(50) DEFAULT NULL COMMENT 'Sprint 编号(从评审标题正则提取,如 Sprint12)',
+  `title` varchar(512) DEFAULT NULL COMMENT '评审标题(含「代码评审」的那一行原文)',
+  `review_type` varchar(20) DEFAULT NULL COMMENT '评审类型:前端/后端(取不到为 NULL)',
+  `review_date` varchar(50) DEFAULT NULL COMMENT '评审日期(原文直通,未做日期解析)',
+  `reviewers` varchar(512) DEFAULT NULL COMMENT '评审人员(原文)',
+  `attachments` varchar(512) DEFAULT NULL COMMENT '附件文件名,多个以换行拼接',
+  `code_filepath` varchar(1024) DEFAULT NULL COMMENT '代码文件路径(xlsx【文件路径】列)',
+  `code_linenumber` varchar(50) DEFAULT NULL COMMENT '代码行号(xlsx【代码行号】列)',
+  `code_snippet` mediumtext COMMENT '代码片段(xlsx【代码片段】列)',
+  `comment_type` varchar(50) DEFAULT NULL COMMENT '意见类型',
+  `checked_by` varchar(255) DEFAULT NULL COMMENT '检视人员',
+  `comment` mediumtext COMMENT '检视意见',
+  `confirmed_by` varchar(255) DEFAULT NULL COMMENT '实际确认人员',
+  `confirm_result` varchar(255) DEFAULT NULL COMMENT '确认结果',
+  `created_at` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '入库时间(每次全量重写时刷新)',
+  PRIMARY KEY (`id`),
+  KEY `idx_review_project_sprint` (`project`, `sprint`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='WIKI代码评审明细(脚本全量重写)';

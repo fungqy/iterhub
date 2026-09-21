@@ -68,14 +68,6 @@ def get_password_hash(password: str) -> str:
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
 
-def init_database():
-    """初始化数据库表结构"""
-    from db.models import Base
-
-    engine = get_engine()
-    Base.metadata.create_all(engine)
-
-
 # 默认管理员口令的环境变量名。注册接口已下线,该口令是系统唯一的初始登录入口。
 _ADMIN_PASSWORD_ENV = "ADMIN_PASSWORD"
 

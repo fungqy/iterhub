@@ -55,7 +55,13 @@ PUSH_ENABLED=false
 > - host 写 `127.0.0.1` 别写 `localhost`：数据库在 WSL 时，`localhost` 会先试 IPv6 `::1`（WSL 转发不监听），超时 10 秒才回退，每次新建连接都白等 10 秒
 > - `JWT_SECRET_KEY` 不设置会启动时自动生成（重启后旧 token 失效，仅适合开发）
 
-**初始化数据库**：在 MySQL 中执行 `backend/sql/` 下的 `init_ddl.sql`（建表）与 `init_dml.sql`（初始化数据）。
+**初始化数据库**（在 MySQL 中按顺序执行 `backend/sql/` 下的两个脚本）：
+
+1. `init_db.sql`：建库 `iterdb`、创建库用户并授权
+2. `init_ddl.sql`：建表（系统/配置、RDM 与文档导入数据、报表派生表、Sprint 屏蔽名单等）
+
+> - 存量库升级**不要**重跑 `init_ddl.sql`。结构性变更的增量脚本统一放在 `backend/sql/migration/` 下，按文件名日期顺序执行（该目录为空表示当前没有待应用的增量）
+> - 表结构的权威定义就是 `init_ddl.sql`；`iterdb.sql` / `iterdb-0915.sql` 是历史导出快照，仅作参考
 
 **启动**：
 

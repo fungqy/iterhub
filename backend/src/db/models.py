@@ -1,3 +1,11 @@
+"""ORM 模型。
+
+⚠ 表结构的**权威定义是 sql/init_ddl.sql**(新库按它建表;存量库按 sql/migration/ 的增量脚本迁移)。
+这里只保留 Web 服务真正读写的表 —— 没有对应建表语句的模型不要加:历史上就有过 7 个
+「只定义、无任何读写」的幽灵模型(holidays / bug_metrics* / avg_metric*),它们既不在
+init_ddl.sql 里,又因为 create_all 早已无人调用而永远建不出来,只会让结构认知漂移。
+"""
+
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -6,7 +14,6 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     ForeignKey,
-    Integer,
     String,
 )
 from sqlalchemy.orm import Mapped, declarative_base, mapped_column, relationship
@@ -206,217 +213,6 @@ class ProjectReminderSettings(Base):
             "story_remind_time": self.story_remind_time,
             "task_remind_time": self.task_remind_time,
             "sonar_remind_time": self.sonar_remind_time,
-            "created_at": self.created_at.isoformat()
-            if self.created_at is not None
-            else None,
-            "updated_at": self.updated_at.isoformat()
-            if self.updated_at is not None
-            else None,
-        }
-
-
-class Holiday(Base):
-    """节假日模型"""
-
-    __tablename__ = "holidays"
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    datestr: Mapped[datetime] = mapped_column(DateTime, unique=True, nullable=False)
-    isholiday: Mapped[bool] = mapped_column(Boolean, default=False)
-    iscompday: Mapped[bool] = mapped_column(Boolean, default=False)
-    weekday: Mapped[int] = mapped_column(Integer)
-
-    @property
-    def datestr_str(self):
-        """获取日期字符串"""
-        # 检查是否是类调用
-        if not isinstance(self, Holiday):
-            return None
-
-        datestr_value = getattr(self, 'datestr', None)
-        if isinstance(datestr_value, datetime):
-            return datestr_value.isoformat()
-        return None
-
-    def to_dict(self):
-        return {
-            "id": self.id,
-            "datestr": self.datestr_str,
-            "isholiday": self.isholiday,
-            "iscompday": self.iscompday,
-            "weekday": self.weekday,
-        }
-
-
-class BugMetric(Base):
-    """故障度量模型"""
-
-    __tablename__ = "bug_metrics"
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    project_id: Mapped[str] = mapped_column(String(50), nullable=False)
-    project_name: Mapped[str] = mapped_column(String(255))
-    metric_date: Mapped[datetime] = mapped_column(DateTime)
-    bug_count: Mapped[int] = mapped_column(Integer, default=0)
-    bug_created_count: Mapped[int] = mapped_column(Integer, default=0)
-    bug_resolved_count: Mapped[int] = mapped_column(Integer, default=0)
-    bug_open_count: Mapped[int] = mapped_column(Integer, default=0)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
-
-
-class BugMetricByDeveloper(Base):
-    """开发人员故障度量模型"""
-
-    __tablename__ = "bug_metrics_by_developer"
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    project_id: Mapped[str] = mapped_column(String(50), nullable=False)
-    project_name: Mapped[str] = mapped_column(String(255))
-    metric_date: Mapped[datetime] = mapped_column(DateTime)
-    developer_id: Mapped[str] = mapped_column(String(50))
-    developer_name: Mapped[str] = mapped_column(String(100))
-    bug_count: Mapped[int] = mapped_column(Integer, default=0)
-    bug_created_count: Mapped[int] = mapped_column(Integer, default=0)
-    bug_resolved_count: Mapped[int] = mapped_column(Integer, default=0)
-    bug_open_count: Mapped[int] = mapped_column(Integer, default=0)
-    avg_resolve_time_seconds: Mapped[int] = mapped_column(BigInteger, default=0)
-    avg_finish_time_seconds: Mapped[int] = mapped_column(BigInteger, default=0)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
-
-
-class AvgMetricByDay(Base):
-    """每日平均故障完成时长模型"""
-
-    __tablename__ = "avg_metric_by_day"
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    metric_date: Mapped[datetime] = mapped_column(DateTime)
-    avg_resolve_time_seconds: Mapped[int] = mapped_column(BigInteger, default=0)
-    avg_finish_time_seconds: Mapped[int] = mapped_column(BigInteger, default=0)
-    bug_count: Mapped[int] = mapped_column(Integer, default=0)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, onupdate=datetime.now)
-
-    def to_dict(self):
-        return {
-            "id": self.id,
-            "metric_date": self.metric_date.isoformat()
-            if self.metric_date is not None
-            else None,
-            "avg_resolve_time_seconds": self.avg_resolve_time_seconds,
-            "avg_finish_time_seconds": self.avg_finish_time_seconds,
-            "bug_count": self.bug_count,
-            "created_at": self.created_at.isoformat()
-            if self.created_at is not None
-            else None,
-            "updated_at": self.updated_at.isoformat()
-            if self.updated_at is not None
-            else None,
-        }
-
-
-class AvgMetricByProject(Base):
-    """各项目故障平均完成时长模型"""
-
-    __tablename__ = "avg_metric_by_project"
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    project_id: Mapped[str] = mapped_column(String(50), nullable=False)
-    project_name: Mapped[str] = mapped_column(String(255))
-    metric_date: Mapped[datetime] = mapped_column(DateTime)
-    avg_resolve_time_seconds: Mapped[int] = mapped_column(BigInteger, default=0)
-    avg_finish_time_seconds: Mapped[int] = mapped_column(BigInteger, default=0)
-    bug_count: Mapped[int] = mapped_column(Integer, default=0)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, onupdate=datetime.now)
-
-    def to_dict(self):
-        return {
-            "id": self.id,
-            "project_id": self.project_id,
-            "project_name": self.project_name,
-            "metric_date": self.metric_date.isoformat()
-            if self.metric_date is not None
-            else None,
-            "avg_resolve_time_seconds": self.avg_resolve_time_seconds,
-            "avg_finish_time_seconds": self.avg_finish_time_seconds,
-            "bug_count": self.bug_count,
-            "created_at": self.created_at.isoformat()
-            if self.created_at is not None
-            else None,
-            "updated_at": self.updated_at.isoformat()
-            if self.updated_at is not None
-            else None,
-        }
-
-
-class AvgMetricByDeveloper(Base):
-    """各开发人员故障平均完成时长模型"""
-
-    __tablename__ = "avg_metric_by_developer"
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    developer_id: Mapped[str] = mapped_column(String(50), nullable=False)
-    developer_name: Mapped[str] = mapped_column(String(100))
-    metric_date: Mapped[datetime] = mapped_column(DateTime)
-    avg_resolve_time_seconds: Mapped[int] = mapped_column(BigInteger, default=0)
-    avg_finish_time_seconds: Mapped[int] = mapped_column(BigInteger, default=0)
-    bug_count: Mapped[int] = mapped_column(Integer, default=0)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, onupdate=datetime.now)
-
-    def to_dict(self):
-        return {
-            "id": self.id,
-            "developer_id": self.developer_id,
-            "developer_name": self.developer_name,
-            "metric_date": self.metric_date.isoformat()
-            if self.metric_date is not None
-            else None,
-            "avg_resolve_time_seconds": self.avg_resolve_time_seconds,
-            "avg_finish_time_seconds": self.avg_finish_time_seconds,
-            "bug_count": self.bug_count,
-            "created_at": self.created_at.isoformat()
-            if self.created_at is not None
-            else None,
-            "updated_at": self.updated_at.isoformat()
-            if self.updated_at is not None
-            else None,
-        }
-
-
-class AvgMetricByProjectDeveloper(Base):
-    """各项目各开发人员的故障平均完成时长表"""
-
-    __tablename__ = "avg_metric_by_project_developer"
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    project_id: Mapped[str] = mapped_column(String(50), nullable=False)
-    project_name: Mapped[str] = mapped_column(String(255))
-    developer_id: Mapped[str] = mapped_column(String(50), nullable=False)
-    developer_name: Mapped[str] = mapped_column(String(100))
-    metric_date: Mapped[datetime] = mapped_column(DateTime)
-    avg_resolve_time_seconds: Mapped[int] = mapped_column(BigInteger, default=0)
-    avg_finish_time_seconds: Mapped[int] = mapped_column(BigInteger, default=0)
-    bug_count: Mapped[int] = mapped_column(Integer, default=0)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, onupdate=datetime.now)
-
-    def to_dict(self):
-        return {
-            "id": self.id,
-            "project_id": self.project_id,
-            "project_name": self.project_name,
-            "developer_id": self.developer_id,
-            "developer_name": self.developer_name,
-            "metric_date": self.metric_date.isoformat()
-            if self.metric_date is not None
-            else None,
-            "avg_resolve_time_seconds": self.avg_resolve_time_seconds,
-            "avg_finish_time_seconds": self.avg_finish_time_seconds,
-            "bug_count": self.bug_count,
             "created_at": self.created_at.isoformat()
             if self.created_at is not None
             else None,
