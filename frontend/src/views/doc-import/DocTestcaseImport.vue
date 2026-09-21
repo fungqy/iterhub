@@ -14,11 +14,12 @@ import FileUpload, { type FileUploadSelectEvent } from 'primevue/fileupload'
 import ProgressSpinner from 'primevue/progressspinner'
 import {
   dataImportApi,
+  type TestcaseBatchReport,
   type TestcaseRecord,
-  type TestcaseReport,
 } from '@/api/dataImport'
 import { reportsApi, type ProjectOption } from '@/api/reports'
 import { TH } from '@/constants/tableHeaders'
+import TestcaseFileReportPanel from './TestcaseFileReportPanel.vue'
 
 const confirm = useConfirm()
 const notify = useNotify()
@@ -32,8 +33,11 @@ const emit = defineEmits<{
 }>()
 
 /**
- * 五步(2026-09-18 二改):选择项目 → 上传文档 → 数据校验 → 检查已有数据 → 执行导入。
+ * 五步:选择项目 → 上传文档 → 数据校验 → 检查已有数据 → 执行导入。
  *
+ * ⚠ 2026-09-21:第 2 步改为**可一次选多份 CSV**,校验与导入都按这一批文件走。判定仍是
+ *   **逐份**的 —— 某一份文件的故事号没同步,只拒它自己,不拖累同批其余文件,界面上逐份
+ *   给出结论(见 TestcaseFileReportPanel)。
  * ⚠ 与一改的最大区别:**不再让用户手选 Sprint**。测试用例在 Jira 侧不挂迭代,但每行都有
  *   【需求】(故事号),而故事号经 rdm_issue 能确定它现在所在的迭代 —— 迭代归属因此由
  *   数据自己决定,而不是由界面上的一个下拉框决定。
@@ -55,8 +59,13 @@ const selectedJiraProjectId = ref<string>('')
 const selectedProjectName = ref<string>('')
 const loadingProjects = ref(false)
 
-/** 用户在「上传文档」选中的文件 —— 校验与导入都用它(不必让用户再选一次) */
-const pendingFile = ref<File | null>(null)
+/**
+ * 用户在「上传文档」选中的文件 —— 校验与导入都用这一批(不必让用户再选一次)。
+ * ⚠ 2026-09-21 起是**一批**而不是一份:「一次选多份、一起导入」就是这一版要解决的问题。
+ */
+const pendingFiles = ref<File[]>([])
+/** 文件选择控件是否展开 —— 收下文件后收起(见 onPickFile);「继续添加」再展开 */
+const picking = ref(true)
 /**
  * 文件控件的实例 —— 后缀不合规时要把控件内部那份选择清掉。
  *
@@ -68,7 +77,8 @@ const pendingFile = ref<File | null>(null)
  */
 const fileUploadRef = ref<{ clear: () => void } | null>(null)
 const validating = ref(false)
-const validateResult = ref<TestcaseReport | null>(null)
+/** 这一批文件的校验结论(逐份);null = 还没校验过 */
+const validateBatch = ref<TestcaseBatchReport | null>(null)
 
 const existingData = ref<TestcaseRecord[]>([])
 const existingTotal = ref(0)
@@ -77,54 +87,49 @@ const pageSize = ref(20)
 const loadingData = ref(false)
 
 const uploading = ref(false)
-const importResult = ref<TestcaseReport | null>(null)
+/** 这一批文件的导入结论(逐份);null = 还没导入过 */
+const importBatch = ref<TestcaseBatchReport | null>(null)
 
-/** 迭代状态的中文名 —— 校验报告里要让人一眼看出这个迭代是不是还在进行 */
-const SPRINT_STATE_LABEL: Record<string, string> = {
-  active: '进行中',
-  closed: '已结束',
-  future: '未开始',
-}
+/** 通过校验的文件 —— 第 4 步查已有数据、第 5 步导入都只针对它们 */
+const validFiles = computed(() => (validateBatch.value?.files ?? []).filter(f => f.valid))
 
-/** 文档里解析出的故事号 —— 「检查已有数据」与「清空」都按它收窄范围 */
-const storyKeys = computed(() => (validateResult.value?.stories ?? []).map(s => s.story_key))
-
-/** 故事号 → 迭代归属(校验报告的核心内容) */
-const storyRows = computed(() => validateResult.value?.stories ?? [])
-
-/** 入库行数 − 用例数:差额是「一个用例引用多个故事」展开出来的,不是重复导入 */
-const expandNote = computed(() => {
-  const r = importResult.value
-  if (!r) return ''
-  const written = r.imported ?? 0
-  const cases = r.case_count ?? 0
-  if (written === cases) return `共 ${cases} 个用例，每个引用 1 个故事，入库 ${written} 行。`
-  return `共 ${cases} 个用例，其中引用多个故事的被展开成多行，故入库 ${written} 行。`
+/**
+ * 通过校验的文件里解析出的故事号(并集)—— 「检查已有数据」与「清空」都按它收窄范围。
+ * ⚠ 取并集而不是逐份各查一遍:第 4 步问的是「这批文件会不会重复导入」,
+ *   分成 N 次查询只会让同一个故事号在表里出现 N 遍。
+ */
+const storyKeys = computed(() => {
+  const keys = new Set<string>()
+  for (const file of validFiles.value) {
+    for (const story of file.stories ?? []) keys.add(story.story_key)
+  }
+  return [...keys]
 })
 
-/** 读取的行数 vs 归并出的用例数 —— 源文档里一个用例占「首行 + N 行步骤」 */
-function mergeNote(r: TestcaseReport | null) {
-  if (!r) return ''
-  return `源文档 ${r.total_rows ?? 0} 行 → 归并出 ${r.case_count ?? 0} 个用例（含步骤 ${r.step_count ?? 0} 条）`
+/** 本批可导入行数合计 —— 一句话结论用 */
+const importableRows = computed(() =>
+  validFiles.value.reduce((sum, f) => sum + (f.importable ?? 0), 0)
+)
+
+/** 导入批里被拒的文件数 —— 汇总文案要说清"哪些没进来" */
+const rejectedCount = computed(() => {
+  const batch = importBatch.value
+  return batch ? batch.file_count - batch.valid_count : 0
+})
+
+/**
+ * 同名 + 同大小 + 同修改时间 ⇒ 同一份文件。
+ * ⚠ 重复选中同一份文件不会导错(后端 upsert 幂等),但报告里会长出重复项白白吓人,
+ *   故在收文件时就去重。
+ */
+function sameFile(a: File, b: File) {
+  return a.name === b.name && a.size === b.size && a.lastModified === b.lastModified
 }
 
-const skipRows = computed(() => {
-  const s = importResult.value?.skipped
-  if (!s) return []
-  return [
-    {
-      label: '关键字为空且不是步骤行',
-      count: s.no_case_key,
-      hint: '既不是用例首行也不是步骤行，无法归属',
-    },
-    {
-      label: '步骤行出现在任何用例之前',
-      count: s.orphan_step,
-      hint: '没有可挂靠的用例，多半是首行被删掉了',
-    },
-    { label: '空的步骤行（只有步骤ID）', count: s.empty_step, hint: '没有步骤内容，未计入步骤数' },
-  ].filter(r => r.count > 0)
-})
+/** 列表 / v-for 的稳定 key */
+function fileKey(file: File) {
+  return `${file.name}-${file.size}-${file.lastModified}`
+}
 
 async function loadProjects() {
   loadingProjects.value = true
@@ -137,11 +142,12 @@ async function loadProjects() {
   }
 }
 
-/** 换项目 = 一切都失效:校验结论是「这份文件对这个项目」的判断,导入结果更是不能跨项目留 */
+/** 换项目 = 一切都失效:校验结论是「这批文件对这个项目」的判断,导入结果更是不能跨项目留 */
 function resetAll() {
-  pendingFile.value = null
-  validateResult.value = null
-  importResult.value = null
+  pendingFiles.value = []
+  picking.value = true
+  validateBatch.value = null
+  importBatch.value = null
   existingData.value = []
   existingTotal.value = 0
   currentPage.value = 1
@@ -167,45 +173,73 @@ async function onProjectChange(projectId: number | null) {
  *   只是把 File 存起来),「下一步」才是确认,关闭弹窗就是取消。
  *   也因此这里不再 `currentStep = 3`:跳步是原来那个「确定,去校验」按钮的行为,
  *   留着它「下一步」就永远点不到,等于把确认动作藏回了那个按钮里。
+ * ⚠ 2026-09-21 支持多选:一批文件就是「一次导入」的单位,校验与写库都按批走。
+ *   不合规的后缀**只忽略那几份**而不是整批作废(并点名说明)—— 用户一次拖进 10 个文件,
+ *   不该因为混进一个 .xlsx 就全部重选。
  */
 function onPickFile(event: FileUploadSelectEvent) {
   const rawFiles = event.files as File | File[] | undefined
-  const file = Array.isArray(rawFiles) ? rawFiles[0] : rawFiles
-  // 用户打开系统文件框又取消 ⇒ files 为空。这不是错误,不该弹警告。
-  if (!file) return
-  // ⚠ 只认 .csv(与后端 _require_csv 同口径)。这份导出是 CSV;用户若在 Excel 里另存过,
-  //   后缀会变成 .xlsx,那种文件这里不接 —— 直接说清要什么,比事后回一个 400 便宜。
-  if (!/\.csv$/i.test(file.name)) {
-    notify('warn', '仅支持 .csv（Jira 导出的测试用例表）')
-    fileUploadRef.value?.clear()
+  const picked = rawFiles == null ? [] : Array.isArray(rawFiles) ? rawFiles : [rawFiles]
+  if (!picked.length) {
+    // 用户打开系统文件框又取消。已有文件时顺手把控件收起来,别占着位置。
+    if (pendingFiles.value.length) picking.value = false
     return
   }
-  pendingFile.value = file
-  validateResult.value = null
-  importResult.value = null
+
+  const accepted: File[] = []
+  const rejected: string[] = []
+  for (const file of picked) {
+    // ⚠ 只认 .csv(与后端 require_testcase_files 同口径)。这份导出是 CSV;用户若在 Excel
+    //   里另存过,后缀会变成 .xlsx —— 那种文件这里不接,直接说清要什么比事后回一个 400 便宜。
+    if (!/\.csv$/i.test(file.name)) {
+      rejected.push(file.name)
+      continue
+    }
+    if (pendingFiles.value.some(f => sameFile(f, file))) continue
+    if (accepted.some(f => sameFile(f, file))) continue
+    accepted.push(file)
+  }
+  if (rejected.length) {
+    notify('warn', `仅支持 .csv（Jira 导出的测试用例表），已忽略：${rejected.join('、')}`)
+  }
+  if (accepted.length) pendingFiles.value = [...pendingFiles.value, ...accepted]
+
+  fileUploadRef.value?.clear()
+  picking.value = false
+  // 文件集合一变,上一次的校验结论就不再对应当前这批文件
+  validateBatch.value = null
+  importBatch.value = null
 }
 
-function reselectFile() {
-  pendingFile.value = null
-  validateResult.value = null
-  importResult.value = null
+function removeFile(file: File) {
+  pendingFiles.value = pendingFiles.value.filter(f => !sameFile(f, file))
+  if (!pendingFiles.value.length) picking.value = true
+  validateBatch.value = null
+  importBatch.value = null
 }
 
-/** 第 3 步:跑校验。**只读不写库**,可反复点。 */
+function clearFiles() {
+  pendingFiles.value = []
+  picking.value = true
+  validateBatch.value = null
+  importBatch.value = null
+}
+
+/** 第 3 步:逐份跑校验。**只读不写库**,可反复点。 */
 async function runValidate() {
-  const file = pendingFile.value
-  if (!file) {
+  if (!pendingFiles.value.length) {
     notify('warn', '请先选择文件')
     return
   }
   validating.value = true
   try {
-    const res = await dataImportApi.validateTestcases(selectedJiraProjectId.value, file)
-    validateResult.value = res
-    if (res.valid) {
-      notify('success', `校验通过：${res.importable ?? 0} 行可导入`)
+    const res = await dataImportApi.validateTestcases(selectedJiraProjectId.value, pendingFiles.value)
+    validateBatch.value = res
+    if (res.success) {
+      const importable = res.files.reduce((sum, f) => sum + (f.valid ? f.importable ?? 0 : 0), 0)
+      notify('success', `校验通过：${res.valid_count} 个文件共 ${importable} 行可导入`)
     } else {
-      notify('warn', '校验未通过，请查看下方原因')
+      notify('warn', '所有文件都未通过校验，请查看下方原因')
     }
   } catch {
     // 失败提示由 axios 拦截器统一给出(校验结论保持为空,不会留下「半份报告」)
@@ -214,7 +248,7 @@ async function runValidate() {
   }
 }
 
-/** 第 4 步进入时按文档的故事号拉已有数据 —— 「这份文档会不会重复导入」就看它 */
+/** 第 4 步进入时按这批文件的故事号拉已有数据 —— 「这批文件会不会重复导入」就看它 */
 async function loadExistingData() {
   if (!selectedJiraProjectId.value || !storyKeys.value.length) return
   loadingData.value = true
@@ -244,8 +278,8 @@ function handleClear() {
   const n = storyKeys.value.length
   confirm.require({
     message:
-      `将删除本次文档涉及的 ${n} 个故事号下的 ${existingTotal.value} 条测试用例，是否继续？\n`
-      + '注意：只要用例关联的故事号在本次文档里，'
+      `将删除这批文件涉及的 ${n} 个故事号下的 ${existingTotal.value} 条测试用例，是否继续？\n`
+      + '注意：只要用例关联的故事号在这批文件里，'
       + '表里这些用例（含此前导入的）都会被一并删除。',
     header: '确认删除',
     icon: 'pi pi-exclamation-triangle',
@@ -268,18 +302,23 @@ function handleClear() {
 
 /** 第 5 步:写库。判定与校验同源,所以这里不会再出现"校验通过却导不进去"的意外 */
 async function runImport() {
-  const file = pendingFile.value
-  if (!file) {
+  if (!pendingFiles.value.length) {
     notify('warn', '请先选择文件')
     return
   }
   uploading.value = true
-  importResult.value = null
+  importBatch.value = null
   try {
-    const res = await dataImportApi.uploadTestcases(selectedJiraProjectId.value, file)
-    importResult.value = res
+    const res = await dataImportApi.uploadTestcases(selectedJiraProjectId.value, pendingFiles.value)
+    importBatch.value = res
+    const rejected = res.file_count - res.valid_count
     if (res.success) {
-      notify('success', `成功导入 ${res.imported ?? 0} 行（${res.case_count ?? 0} 个用例）`)
+      // 部分文件被拒时用 warn 而不是 success:结论是"导了,但不全",别让绿条盖过这件事
+      const tail = rejected ? `；${rejected} 个文件被拒绝（见下方原因）` : ''
+      notify(
+        rejected ? 'warn' : 'success',
+        `成功导入 ${res.imported} 行（${res.valid_count} 个文件）${tail}`
+      )
       currentPage.value = 1
       await loadExistingData()
     } else {
@@ -292,9 +331,9 @@ async function runImport() {
   }
 }
 
-/** 导入完成后再导同一份文件 = 幂等覆盖，这里给个明确的「再导一次」入口 */
+/** 导入完成后再导同一批文件 = 幂等覆盖，这里给个明确的「再导一次」入口 */
 function handleAgain() {
-  importResult.value = null
+  importBatch.value = null
 }
 
 function handleReset() {
@@ -358,20 +397,56 @@ watch(() => props.visible, (val) => {
           </div>
         </div>
 
-        <!-- ── 2. 上传文档 ── -->
+        <!-- ── 2. 上传文档(可一次选多份) ── -->
         <div v-if="currentStep === 2" class="flex flex-col gap-4">
           <Message severity="info" :closable="false">
             上传 CSV（<b>.csv</b>），需包含列：关键字、概要、描述、测试用例集、最新结果、
             标签、步骤ID、步骤、测试数据、期望结果、<b>需求</b>。
-            编码支持 UTF-8（含 BOM）与 GBK。
+            编码支持 UTF-8（含 BOM）与 GBK。支持<b>一次选择多份</b>，校验与导入都按这一批走。
           </Message>
+
+          <!-- 已收下的文件列表:可逐个移除,也可「继续添加」再补几份 -->
+          <div v-if="pendingFiles.length" class="flex flex-col gap-2">
+            <div class="flex items-center justify-between gap-4">
+              <span class="ds-meta">已选择 {{ pendingFiles.length }} 个文件</span>
+              <div class="flex gap-2">
+                <Button
+                  v-if="!picking"
+                  label="继续添加"
+                  severity="secondary"
+                  text
+                  size="small"
+                  @click="picking = true"
+                />
+                <Button label="清空" severity="secondary" text size="small" @click="clearFiles" />
+              </div>
+            </div>
+            <ul class="flex flex-col gap-2">
+              <li
+                v-for="file in pendingFiles"
+                :key="fileKey(file)"
+                class="flex items-center justify-between gap-4"
+              >
+                <span class="ds-meta">{{ file.name }}</span>
+                <Button
+                  icon="pi pi-times"
+                  severity="secondary"
+                  text
+                  rounded
+                  size="small"
+                  aria-label="移除该文件"
+                  @click="removeFile(file)"
+                />
+              </li>
+            </ul>
+          </div>
 
           <!-- 只有「选择文件」一个按钮:选中即收下,确认交给下方「下一步」,取消交给弹窗关闭 -->
           <FileUpload
-            v-if="!pendingFile"
+            v-if="picking"
             ref="fileUploadRef"
             customUpload
-            :multiple="false"
+            :multiple="true"
             accept=".csv"
             chooseLabel="选择文件"
             :showUploadButton="false"
@@ -380,109 +455,66 @@ watch(() => props.visible, (val) => {
             @select="onPickFile"
           />
 
-          <div v-else class="flex items-center justify-between gap-4">
-            <span class="ds-meta">已选择：{{ pendingFile.name }}</span>
-            <Button label="重新选择" severity="secondary" text size="small" @click="reselectFile" />
-          </div>
-
           <div class="flex justify-end gap-2 pt-4">
             <Button label="上一步" severity="secondary" @click="currentStep = 1" />
-            <Button label="下一步" :disabled="!pendingFile" @click="currentStep = 3" />
+            <Button label="下一步" :disabled="!pendingFiles.length" @click="currentStep = 3" />
           </div>
         </div>
 
-        <!-- ── 3. 数据校验 ── -->
+        <!-- ── 3. 数据校验(逐份出结论) ── -->
         <div v-if="currentStep === 3" class="flex flex-col gap-4">
-          <p v-if="pendingFile" class="ds-meta">待校验文件：{{ pendingFile.name }}</p>
+          <p v-if="pendingFiles.length" class="ds-meta">
+            待校验文件（{{ pendingFiles.length }} 个）：{{ pendingFiles.map(f => f.name).join('、') }}
+          </p>
 
           <div v-if="validating" class="flex items-center gap-2 ds-meta">
             <ProgressSpinner strokeWidth="4" class="w-5 h-5" />
-            <span>正在解析并解析故事号的迭代归属…</span>
+            <span>正在逐份解析并解析故事号的迭代归属…</span>
           </div>
 
-          <template v-if="!validateResult && !validating">
+          <template v-if="!validateBatch && !validating">
             <Message severity="info" :closable="false">
-              校验<b>只读不写库</b>，可反复执行。它会解析文档里的每个故事号，
-              并到 rdm_issue 里查出该故事号现在所属的迭代 —— 任何一个故事号查不到，
-              <b>整份文件都会被拒绝</b>（没有迭代归属的用例在报表里是隐形的）。
+              校验<b>只读不写库</b>，可反复执行。它会逐份解析文档里的每个故事号，
+              并到 rdm_issue 里查出该故事号现在所属的迭代 —— 某份文件里有故事号查不到，
+              <b>该份文件被整份拒绝</b>（没有迭代归属的用例在报表里是隐形的），
+              但<b>不影响同一批的其它文件</b>。
             </Message>
             <div class="flex justify-end gap-2 pt-4">
               <Button label="上一步" severity="secondary" @click="currentStep = 2" />
-              <Button label="开始校验" :disabled="!pendingFile" @click="runValidate" />
+              <Button label="开始校验" :disabled="!pendingFiles.length" @click="runValidate" />
             </div>
           </template>
 
-          <template v-if="validateResult">
-            <Message :severity="validateResult.valid ? 'success' : 'error'" :closable="false">
-              <template v-if="validateResult.valid">
-                校验通过：<b>{{ validateResult.importable ?? 0 }}</b> 行可导入
-                （{{ validateResult.case_count ?? 0 }} 个用例，共读取
-                {{ validateResult.total_rows ?? 0 }} 行）
+          <template v-if="validateBatch">
+            <Message :severity="validateBatch.success ? 'success' : 'error'" :closable="false">
+              <template v-if="validateBatch.valid_count === validateBatch.file_count">
+                校验通过：{{ validateBatch.file_count }} 个文件全部可导入，共
+                {{ importableRows }} 行
               </template>
-              <template v-else-if="!validateResult.header_ok">
-                表头校验未通过，文件无法用于导入
+              <template v-else-if="validateBatch.success">
+                {{ validateBatch.file_count }} 个文件中
+                <b>{{ validateBatch.valid_count }}</b> 个可导入（共 {{ importableRows }} 行），
+                其余 {{ validateBatch.file_count - validateBatch.valid_count }} 个被拒绝
+                —— 导入时只会写入可导入的文件
               </template>
               <template v-else>
-                校验未通过，整份文件被拒绝（共读取 {{ validateResult.total_rows ?? 0 }} 行）
+                所有文件都未通过校验（共 {{ validateBatch.file_count }} 份），无法导入
               </template>
             </Message>
 
-            <p class="ds-meta">{{ mergeNote(validateResult) }}</p>
-
-            <div v-if="storyRows.length" class="flex flex-col gap-2">
-              <p class="ds-meta">故事号 → 迭代归属</p>
-              <DataTable :value="storyRows" class="ds-table">
-                <Column field="story_key" :header="TH.storyKey" class="ds-nowrap" />
-                <Column :header="TH.sprint" class="ds-nowrap">
-                  <template #body="{ data }">
-                    {{ data.sprint_name || data.sprint_id || '—' }}
-                  </template>
-                </Column>
-                <Column header="迭代状态" class="ds-nowrap">
-                  <template #body="{ data }">
-                    {{ SPRINT_STATE_LABEL[data.state] || data.state || '—' }}
-                  </template>
-                </Column>
-                <Column field="case_count" header="用例数" class="ds-nowrap" />
-              </DataTable>
-            </div>
-
-            <div v-if="validateResult.missing_stories?.length" class="flex flex-col gap-2">
-              <p class="ds-meta">
-                以下故事号在 rdm_issue 中不存在（共 {{ validateResult.missing_stories.length }} 个）
-              </p>
-              <ul class="flex flex-col gap-1 pl-5 list-disc ds-meta">
-                <li v-for="k in validateResult.missing_stories.slice(0, 20)" :key="k">{{ k }}</li>
-              </ul>
-            </div>
-
-            <div v-if="validateResult.case_sets?.length" class="flex flex-col gap-2">
-              <p class="ds-meta">文档中的用例集</p>
-              <ul class="flex flex-col gap-1 pl-5 list-disc ds-meta">
-                <li v-for="cs in validateResult.case_sets" :key="cs.name">
-                  {{ cs.name }}：{{ cs.count }} 个用例
-                </li>
-              </ul>
-            </div>
-
-            <div v-if="validateResult.errors?.length" class="flex flex-col gap-2">
-              <p class="ds-meta">原因</p>
-              <ul class="flex flex-col gap-1 pl-5 list-disc ds-meta">
-                <li v-for="(err, idx) in validateResult.errors" :key="idx">{{ err }}</li>
-              </ul>
-            </div>
+            <TestcaseFileReportPanel
+              v-for="(report, idx) in validateBatch.files"
+              :key="`${idx}-${report.filename}`"
+              :report="report"
+              phase="validate"
+            />
 
             <div class="flex justify-end gap-2 pt-4">
               <Button label="上一步" severity="secondary" @click="currentStep = 2" />
               <Button label="重新校验" severity="secondary" @click="runValidate" />
-              <Button
-                label="下一步"
-                :disabled="!validateResult.valid"
-                @click="currentStep = 4"
-              />
+              <Button label="下一步" :disabled="!validateBatch.success" @click="currentStep = 4" />
             </div>
           </template>
-
         </div>
 
         <!-- ── 4. 检查已有数据 ── -->
@@ -493,7 +525,8 @@ watch(() => props.visible, (val) => {
 
           <template v-else-if="existingTotal > 0">
             <Message severity="warn" :closable="false">
-              本次文档涉及的 {{ storyKeys.length }} 个故事号下已有 <b>{{ existingTotal }}</b> 条测试用例。
+              本次通过校验的 {{ validFiles.length }} 份文件涉及的 {{ storyKeys.length }} 个故事号下已有
+              <b>{{ existingTotal }}</b> 条测试用例。
               直接导入不会清空它们，只会按「用例 + 故事」覆盖同一条。
             </Message>
             <DataTable :value="existingData" :loading="loadingData" class="ds-table">
@@ -521,7 +554,8 @@ watch(() => props.visible, (val) => {
           </template>
 
           <Message v-else severity="success" :closable="false">
-            本次文档涉及的 {{ storyKeys.length }} 个故事号下暂无测试用例，直接导入即可。
+            本次通过校验的 {{ validFiles.length }} 份文件涉及的 {{ storyKeys.length }} 个故事号下
+            暂无测试用例，直接导入即可。
           </Message>
 
           <div class="flex justify-end gap-2 pt-4">
@@ -530,82 +564,50 @@ watch(() => props.visible, (val) => {
           </div>
         </div>
 
-        <!-- ── 5. 执行导入 ── -->
+        <!-- ── 5. 执行导入(逐份出结论) ── -->
         <div v-if="currentStep === 5" class="flex flex-col gap-4">
-          <Message v-if="!importResult" severity="info" :closable="false">
-            将把 {{ validateResult?.case_count ?? 0 }} 个用例写入 <b>rdm_testcase</b>，
-            迭代归属已由故事号确定（见上一步的校验报告）。
+          <Message v-if="!importBatch" severity="info" :closable="false">
+            将把 <b>{{ validFiles.length }}</b> 份通过校验的文件（共 {{ importableRows }} 行）
+            写入 <b>rdm_testcase</b>，迭代归属已由故事号确定（见上一步的校验报告）。
+            被拒绝的文件<b>一条也不会写</b>。
           </Message>
 
           <div v-if="uploading" class="flex items-center gap-2 ds-meta">
             <ProgressSpinner strokeWidth="4" class="w-5 h-5" />
-            <span>正在解析并写入数据库…</span>
+            <span>正在逐份解析并写入数据库…</span>
           </div>
 
-          <div v-if="importResult && !importResult.success" class="flex flex-col gap-2">
-            <Message severity="error" :closable="false">没有导入任何数据</Message>
-            <ul class="flex flex-col gap-1 pl-5 list-disc ds-meta">
-              <li v-for="(err, idx) in importResult.errors" :key="idx">{{ err }}</li>
-            </ul>
-          </div>
-
-          <template v-if="importResult?.success">
-            <Message severity="success" :closable="false">
-              成功导入 <b>{{ importResult.imported || 0 }}</b> 行
-              （{{ importResult.case_count || 0 }} 个用例，步骤 {{ importResult.step_count || 0 }} 条）
+          <template v-if="importBatch">
+            <Message
+              :severity="importBatch.success ? (rejectedCount ? 'warn' : 'success') : 'error'"
+              :closable="false"
+            >
+              <template v-if="importBatch.success">
+                成功导入 <b>{{ importBatch.imported }}</b> 行
+                （{{ importBatch.valid_count }} 个文件）<template v-if="rejectedCount">
+                  ；另有 {{ rejectedCount }} 个文件被拒绝，未写入任何数据（见下方原因）
+                </template>
+              </template>
+              <template v-else>所有文件都没有导入任何数据</template>
             </Message>
 
-            <p class="ds-meta">{{ mergeNote(importResult) }}</p>
-            <p class="ds-meta">{{ expandNote }}</p>
-            <p v-if="importResult.encoding" class="ds-meta">
-              源文件按 <b>{{ importResult.encoding }}</b> 解码。
-            </p>
-
-            <div v-if="importResult.stories?.length" class="flex flex-col gap-2">
-              <p class="ds-meta">写入的迭代（由故事号反查得出）</p>
-              <ul class="flex flex-col gap-1 pl-5 list-disc ds-meta">
-                <li v-for="s in importResult.stories" :key="s.story_key">
-                  {{ s.story_key }} → {{ s.sprint_name || s.sprint_id || '—' }}
-                  （{{ SPRINT_STATE_LABEL[s.state || ''] || s.state || '未知' }}）：{{ s.case_count }} 个用例
-                </li>
-              </ul>
-            </div>
-
-            <div v-if="importResult.case_sets?.length" class="flex flex-col gap-2">
-              <p class="ds-meta">写入的用例集</p>
-              <ul class="flex flex-col gap-1 pl-5 list-disc ds-meta">
-                <li v-for="cs in importResult.case_sets" :key="cs.name">
-                  {{ cs.name }}：{{ cs.count }} 个用例
-                </li>
-              </ul>
-            </div>
-
-            <div v-if="skipRows.length" class="flex flex-col gap-2">
-              <p class="ds-meta">已跳过</p>
-              <ul class="flex flex-col gap-1 pl-5 list-disc ds-meta">
-                <li v-for="row in skipRows" :key="row.label">
-                  {{ row.label }}：{{ row.count }} 条<span class="ml-1">（{{ row.hint }}）</span>
-                </li>
-              </ul>
-            </div>
-
-            <div v-if="importResult.errors?.length" class="flex flex-col gap-2">
-              <p class="ds-meta">明细</p>
-              <ul class="flex flex-col gap-1 pl-5 list-disc ds-meta">
-                <li v-for="(err, idx) in importResult.errors" :key="idx">{{ err }}</li>
-              </ul>
-            </div>
+            <TestcaseFileReportPanel
+              v-for="(report, idx) in importBatch.files"
+              :key="`${idx}-${report.filename}`"
+              :report="report"
+              phase="import"
+            />
           </template>
 
           <div class="flex justify-end gap-2 pt-4">
             <Button label="上一步" severity="secondary" @click="currentStep = 4" />
             <Button
-              v-if="!importResult"
+              v-if="!importBatch"
               label="开始导入"
               :disabled="uploading"
               @click="runImport"
             />
-            <Button v-if="importResult?.success" label="再导一次" @click="handleAgain" />
+            <Button v-if="importBatch?.success" label="再导一次" @click="handleAgain" />
             <!-- 本步不再给「关闭」按钮:右上角 × 与 Esc 都经 @update:visible 落到同一个 handleClose
                  (含 handleReset),按钮只是重复一遍同一件事。 -->
           </div>

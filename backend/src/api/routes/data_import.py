@@ -1508,6 +1508,14 @@ def validate_doc_bugs(
 #   (RDM 侧的测试用例自动采集已下线,表未设来源列)。
 #   「清空」因此按**本次文档的故事号**精确删(2026-09-18 二改),不再按迭代/整项目删
 #   —— 唯一能框住「本次导入」的维度就是文档自己引用了哪些故事。
+#
+# ★ 2026-09-21 起支持**一次上传多份 CSV**:校验与导入都按「批」走,但判定仍是**逐份**的 ——
+#   某一份文件的故事号没同步,只拒它自己,不拖累同批其它文件(见 require_testcase_files
+#   与 testcase_batch_report 的注释)。通过的文件在**同一个事务**里写入,中途失败整体回滚,
+#   不会留下「导了一半」的批次;被整份拒绝的文件一行都不会写。
+#   ⚠ 于是 MAX_UPLOAD_BYTES 在这两个端点上约束的是**整批请求体**(_reject_oversize_upload
+#     看的是 Content-Length),单份则由 _spool_upload 分块累计时再拦一次 —— 批量上传时
+#     前者先命中,报错说的是整批过大,这是预期的。
 
 TESTCASE_COLUMN_ALIASES: dict[str, list[str]] = {
     "case_key": ["关键字"],
@@ -1933,12 +1941,18 @@ def evaluate_testcase_import(
     return result
 
 
-def testcase_report(result: dict[str, Any], *, encoding: str, file_size: int) -> dict[str, Any]:
-    """evaluate_testcase_import 的结果 → 接口响应(校验与导入**同形**,前端一套渲染)。
+def testcase_report(
+    result: dict[str, Any], *, filename: str, encoding: str, file_size: int
+) -> dict[str, Any]:
+    """evaluate_testcase_import 的结果 → **单份文件**的接口报告。
 
+    ⚠ 校验与导入走它同一份输出(前端也就只有一套渲染)。
+    ⚠ filename 是 2026-09-21 支持批量后加的:一次请求会回来多份报告,没有文件名就
+      没法把结论对回源文件 —— 而用户最需要一眼看到的恰恰是「哪一份被拒了」。
     ⚠ 不返回 rows/case_refs(几 MB 的入库行没有回给浏览器的理由),只回结论与证据。
     """
     return {
+        "filename": filename,
         "success": not result["fatal"],
         "valid": not result["fatal"],
         "project_id": result["project_id"],
@@ -1955,6 +1969,121 @@ def testcase_report(result: dict[str, Any], *, encoding: str, file_size: int) ->
         "encoding": encoding,
         "file_size": file_size,
     }
+
+
+def testcase_file_error(
+    filename: str, message: str, *, project_id: str, file_size: int = 0
+) -> dict[str, Any]:
+    """单份文件在**最外层**就失败(编码读不出 / 没有数据行)时的报告。
+
+    ⚠ 形状必须与 testcase_report 逐 key 一致(含 project_id)—— 前端是按同一套块渲染
+      整批文件的,少一个 key 就会在界面上渲染出 undefined(见 test_testcase_batch_import
+      的形状护栏)。
+    """
+    return {
+        "filename": filename,
+        "project_id": project_id,
+        "success": False,
+        "valid": False,
+        "header_ok": False,
+        "total_rows": 0,
+        "case_count": 0,
+        "step_count": 0,
+        "importable": 0,
+        "skipped": {},
+        "case_sets": [],
+        "stories": [],
+        "missing_stories": [],
+        "errors": [message],
+        "encoding": None,
+        "file_size": file_size,
+    }
+
+
+def testcase_batch_report(reports: list[dict[str, Any]]) -> dict[str, Any]:
+    """批量外壳:逐份报告 + 一眼可见的汇总。
+
+    ⚠ 汇总**只做加法,不引入新判定**:界面据 success 判断能否进下一步,而它的口径就是
+      「至少一份 valid」,不是「全部 valid」—— 一份文件的故事号没同步,不该拖住同批
+      其余文件;被拒的那份会在 files 里逐字写清原因。
+    ⚠ imported 逐份累加(校验接口每份都是 0)。
+    """
+    valid_count = sum(1 for r in reports if r.get("valid"))
+    return {
+        "files": reports,
+        "file_count": len(reports),
+        "valid_count": valid_count,
+        "success": valid_count > 0,
+        "imported": sum(r.get("imported") or 0 for r in reports),
+    }
+
+
+def require_testcase_files(files: list[UploadFile]) -> None:
+    """批量入口的**请求级**后缀预检:任何一份不是 .csv 都直接 400。
+
+    ⚠ 与逐份的文件级失败是两类东西,不能混:
+      · 后缀不对 ⇒ **请求本身**不合法(前端已按 accept/正则拦过,走到这里是调用方写错),
+        整批拒绝,报错直指问题;
+      · 内容读不出/故事号查不到 ⇒ 单份文件的数据问题,整形进报告继续处理其余文件。
+      把内容问题升级成 400 会让一份坏文件毁掉整批;把格式问题降级成报告又会让
+      「接口被传了 .xlsx」这种调用错误变得悄无声息。
+    """
+    for f in files:
+        _require_csv(f)
+
+
+def evaluate_testcase_file(
+    file: UploadFile,
+    *,
+    project_id: str,
+    session,
+    now,
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """单份上传文件 → (接口报告, evaluate 结果)。evaluate 结果供导入侧写库,校验侧忽略。
+
+    2026-09-21 支持批量后抽出来的:**一份文件的失败只影响它自己**。
+    ⚠ 只兜「读文件」这一段;`_spool_upload` 的 413 直接冒泡 —— 那是请求体整体超限,
+      不是某一份文件的问题,而且必须在读进内存前就拒绝。
+    ⚠ 临时文件无论成败都在 finally 里删掉(批量下一次请求会落 N 个临时文件)。
+    """
+    filename = file.filename or "(未命名文件)"
+    tmp_path, size = _spool_upload(file, suffix=".csv")
+    try:
+        try:
+            headers, data_rows, encoding = read_testcase_csv(tmp_path)
+        except HTTPException as e:
+            return testcase_file_error(
+                filename, str(e.detail), project_id=project_id, file_size=size
+            ), None
+        except Exception as e:  # noqa: BLE001
+            return testcase_file_error(
+                filename,
+                f"处理文件失败: {classify_error(e)[1]}",
+                project_id=project_id,
+                file_size=size,
+            ), None
+
+        if not data_rows:
+            return testcase_file_error(
+                filename, "CSV 文件中没有有效数据行", project_id=project_id, file_size=size
+            ), None
+
+        evaluated = evaluate_testcase_import(
+            session,
+            project_id=project_id,
+            headers=headers,
+            data_rows=data_rows,
+            now=now,
+        )
+        report = testcase_report(
+            evaluated, filename=filename, encoding=encoding, file_size=size
+        )
+        return report, evaluated
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
 
 
 # 幂等写入:唯一键 (case_id, story_key) —— case_id 用 case_key 顶替(理由见本节开头)。
@@ -1993,51 +2122,27 @@ DELETE_TESTCASE_STALE_SQL = text("""
 def validate_testcases(
     request: Request,
     project_id: str = Query(..., description="JIRA项目ID"),
-    file: UploadFile = File(...),
+    files: list[UploadFile] = File(..., description="JIRA 测试用例导出 CSV,可一次提交多份"),
     current_user: dict = Depends(get_current_user_from_header),
 ):
-    """导入前校验:同一份文件、同一套判定,但**只读不写库**,可反复调用。
+    """导入前校验(支持一次提交多份文件):同一套判定,但**只读不写库**,可反复调用。
 
     与 upload 走同一个 evaluate_testcase_import(),故「校验通过」与「导得进去」必然
     一致 —— 不存在文档故障那边的 strict/宽松双口径:故事号解析不到就整份拒绝,
     连导入按钮都不该给。
+    ⚠ 逐份判定、逐份出结论:一份文件失败不会影响同批其余文件(理由见 require_testcase_files)。
     ⚠ 同步 def 而非 async def,理由同 upload_testcases(解析重活不能占事件循环)。
     """
-    _require_csv(file)
     _reject_oversize_upload(request)
+    require_testcase_files(files)
 
-    tmp_path: str | None = None
-    try:
-        tmp_path, size = _spool_upload(file, suffix=".csv")
-        try:
-            headers, data_rows, encoding = read_testcase_csv(tmp_path)
-        except HTTPException:
-            raise
-        except Exception as e:  # noqa: BLE001
-            raise HTTPException(status_code=500, detail=f"处理文件失败: {classify_error(e)[1]}")
-
-        if not data_rows:
-            raise HTTPException(status_code=400, detail="CSV 文件中没有有效数据行")
-
-        with get_session() as session:
-            evaluated = evaluate_testcase_import(
-                session,
-                project_id=project_id,
-                headers=headers,
-                data_rows=data_rows,
-                now=now_beijing(),
-            )
-        return testcase_report(evaluated, encoding=encoding, file_size=size)
-    except HTTPException:
-        raise
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(status_code=500, detail=f"处理文件失败: {classify_error(e)[1]}")
-    finally:
-        if tmp_path:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
+    now = now_beijing()
+    with get_session() as session:
+        reports = [
+            evaluate_testcase_file(f, project_id=project_id, session=session, now=now)[0]
+            for f in files
+        ]
+    return testcase_batch_report(reports)
 
 
 class ClearTestcasesRequest(BaseModel):
@@ -2180,80 +2285,63 @@ async def list_testcases(
 def upload_testcases(
     request: Request,
     project_id: str = Query(..., description="JIRA项目ID"),
-    file: UploadFile = File(...),
+    files: list[UploadFile] = File(..., description="JIRA 测试用例导出 CSV,可一次提交多份"),
     current_user: dict = Depends(get_current_user_from_header),
 ):
-    """导入文档测试用例(CSV)。
+    """导入文档测试用例(CSV,支持一次提交多份)。
 
     与其他导入路径的分工:
       · 【关键字】相同的行归并成一个用例,步骤折成 steps JSON(键名:
         no / action / data / expected);
       · **迭代归属由故事号反查**(不再由前端传 sprint_id):走 evaluate_testcase_import,
         与 /testcases/validate 是同一份实现 —— 校验说能导,这里就一定导得进去;
-      · 故事号必须能在 rdm_issue 里查到、且所属迭代属于所选项目,否则**整份拒绝**;
+      · 故事号必须能在 rdm_issue 里查到、且所属迭代属于所选项目,否则**该份文件整份拒绝**;
         需求为空的用例同样拒绝 —— 唯一键 (case_id, story_key) 里 NULL 互不相等,
         写进去既没有迭代归属,也无法幂等重导。
 
     ⚠ 写入 rdm_testcase 前会按 case_id 清掉不再被引用的旧 story_key 行,故「文档里把
       需求从 A 改成 B」这种改动能被正确反映,不会留下 A 的残留行。
 
+    ⚠ 批量语义(2026-09-21):逐份判定,**通过的文件在同一个事务里写入**;被整份拒绝的
+      文件一行不写,但**不影响**同批其它文件。中途写库失败则整体回滚,不会留下导了一半
+      的批次。
     ⚠ 同步 def 而非 async def,理由同 upload_doc_bugs(解析重活不能占事件循环)。
     """
-    _require_csv(file)
     _reject_oversize_upload(request)
+    require_testcase_files(files)
 
-    tmp_path: str | None = None
-    try:
-        tmp_path, size = _spool_upload(file, suffix=".csv")
-
-        try:
-            headers, data_rows, encoding = read_testcase_csv(tmp_path)
-        except HTTPException:
-            raise
-        except Exception as e:  # noqa: BLE001
-            raise HTTPException(status_code=500, detail=f"处理文件失败: {classify_error(e)[1]}")
-
-        if not data_rows:
-            raise HTTPException(status_code=400, detail="CSV 文件中没有有效数据行")
-
-        with get_session() as session:
-            evaluated = evaluate_testcase_import(
-                session,
-                project_id=project_id,
-                headers=headers,
-                data_rows=data_rows,
-                now=now_beijing(),
+    now = now_beijing()
+    reports: list[dict[str, Any]] = []
+    evaluations: list[dict[str, Any] | None] = []
+    with get_session() as session:
+        for f in files:
+            report, evaluated = evaluate_testcase_file(
+                f, project_id=project_id, session=session, now=now
             )
-            report = testcase_report(evaluated, encoding=encoding, file_size=size)
-            if evaluated["fatal"]:
-                # 整份拒绝:一条也不写。⚠ 刻意回 200 + success=false,而不是 400 ——
-                # 报告要能被前端原样渲染(与 →validate 完全同形),塞进 HTTPException 的
-                # detail 会被 axios 拦截器吃掉,用户只能看到一句话而不是那份原因清单。
-                return report
+            reports.append(report)
+            evaluations.append(evaluated)
 
+        writable = [ev for ev in evaluations if ev is not None and not ev["fatal"]]
+        if writable:
             try:
-                # 按用例清旧的 story_key 行,再 upsert
-                for case_key, refs in evaluated["case_refs"].items():
-                    session.execute(
-                        DELETE_TESTCASE_STALE_SQL,
-                        {"case_id": case_key, "refs": refs},
-                    )
-                for row_data in evaluated["rows"]:
-                    session.execute(TESTCASE_UPSERT_SQL, row_data)
+                for ev in writable:
+                    # 按用例清旧的 story_key 行,再 upsert
+                    for case_key, refs in ev["case_refs"].items():
+                        session.execute(
+                            DELETE_TESTCASE_STALE_SQL,
+                            {"case_id": case_key, "refs": refs},
+                        )
+                    for row_data in ev["rows"]:
+                        session.execute(TESTCASE_UPSERT_SQL, row_data)
                 session.commit()
             except Exception as e:  # noqa: BLE001
                 session.rollback()
                 raise HTTPException(status_code=500, detail=f"导入数据失败: {classify_error(e)[1]}")
 
-        return {**report, "imported": len(evaluated["rows"])}
+    for report, evaluated in zip(reports, evaluations, strict=True):
+        # ⚠ 整份拒绝(false)与文件级失败(evaluated=None)都是 0,不是同一个原因但结论一致
+        report["imported"] = (
+            len(evaluated["rows"]) if evaluated is not None and not evaluated["fatal"] else 0
+        )
 
-    except HTTPException:
-        raise
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(status_code=500, detail=f"处理文件失败: {classify_error(e)[1]}")
-    finally:
-        if tmp_path:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
+    return testcase_batch_report(reports)

@@ -242,6 +242,35 @@ export interface TestcaseReport {
   file_size?: number
 }
 
+/**
+ * **单个文件**的报告 —— 在 TestcaseReport 之上补一个 filename。
+ *
+ * ⚠ 2026-09-21 支持一次上传多份文件后加的:一次请求会回来多份报告,没有文件名就没法
+ *   把结论对回源文件 —— 而用户最需要一眼看到的恰恰是「哪一份被拒了」。
+ */
+export interface TestcaseFileReport extends TestcaseReport {
+  /** 源文件名(后端原样回显上传时的 filename) */
+  filename: string
+}
+
+/**
+ * 批量校验/导入的外壳:逐份报告 + 汇总。
+ *
+ * ⚠ 「能否进下一步」的规则是 **至少一份 valid**(success),不是全部 valid ——
+ *   一份文件的故事号没同步,不该拖住同批其余文件;被拒的那份在 files 里逐字写了原因。
+ */
+export interface TestcaseBatchReport {
+  /** 逐份文件的结论,顺序与上传顺序一致 */
+  files: TestcaseFileReport[]
+  file_count: number
+  /** 通过判定(valid)的文件数 */
+  valid_count: number
+  /** 至少一份文件通过 */
+  success: boolean
+  /** 全部文件合计写入行数(校验接口恒为 0) */
+  imported: number
+}
+
 export const dataImportApi = {
   /**
    * 某项目下 state='closed' 的迭代 —— 导入向导第 2 步「选择 Sprint」的数据源。
@@ -345,17 +374,23 @@ export const dataImportApi = {
 
   // ── 文档测试用例导入 ──────────────────────────────────────────────
   /**
-   * 导入前校验:同一份文件、同一套判定,但**只读不写库**,可反复调用。
+   * 导入前校验(**可一次提交多份文件**):同一套判定,但**只读不写库**,可反复调用。
    *
    * 为什么要有这一步:迭代归属现在**靠故事号反查 rdm_issue**,而故事号解析不到就整份
    * 拒绝 —— 这个判定必须在写库之前摊开给用户看。校验与上传走后端同一个
    * evaluate_testcase_import(),故报告结论就是导入的前置结论,不存在两套口径。
+   *
+   * ⚠ 字段名必须是 `files`(复数):后端签名是 `files: list[UploadFile]`,传 `file`
+   *   会直接 422 —— 好在这类"参数名对不上"在 FastAPI 里是硬失败,不会静默当空处理。
+   * ⚠ 逐个 append 且顺序与入参一致:报告里的 filename 就是对回这份顺序的。
    */
-  async validateTestcases(projectId: string, file: File): Promise<TestcaseReport> {
+  async validateTestcases(projectId: string, files: File[]): Promise<TestcaseBatchReport> {
     const formData = new FormData()
     // 与磁盘解耦后再上传,见 detachedFile 的注释(防 ERR_UPLOAD_FILE_CHANGED)
-    formData.append('file', await detachedFile(file))
-    return post<TestcaseReport>(
+    for (const file of await Promise.all(files.map(detachedFile))) {
+      formData.append('files', file)
+    }
+    return post<TestcaseBatchReport>(
       `/data-import/testcases/validate?project_id=${projectId}`,
       formData,
       { headers: { 'Content-Type': 'multipart/form-data' } }
@@ -407,18 +442,20 @@ export const dataImportApi = {
   },
 
   /**
-   * 上传测试用例 CSV。迭代归属**由故事号反查**(不再传 sprint_id)——
+   * 上传测试用例 CSV(**可一次提交多份**)。迭代归属**由故事号反查**(不再传 sprint_id)——
    * 源文档里没有 sprint 列,但每行都有【需求】(故事号),而故事号经 rdm_issue
    * 能确定它现在所在的那个迭代。
    *
-   * ⚠ 故事号解析不到 ⇒ 后端整份拒绝(success=false,一条都不写),报告形状与
-   *   validateTestcases 完全一致,前端用同一套块渲染即可。
+   * ⚠ 故事号解析不到 ⇒ 后端把**那一份**整份拒绝(success=false,一条都不写),但同批
+   *   其它文件照常写入。逐份报告的形状与 validateTestcases 完全一致,前端同一套块渲染。
    */
-  async uploadTestcases(projectId: string, file: File): Promise<TestcaseReport> {
+  async uploadTestcases(projectId: string, files: File[]): Promise<TestcaseBatchReport> {
     const formData = new FormData()
     // 与磁盘解耦后再上传,见 detachedFile 的注释(防 ERR_UPLOAD_FILE_CHANGED)
-    formData.append('file', await detachedFile(file))
-    return post<TestcaseReport>(
+    for (const file of await Promise.all(files.map(detachedFile))) {
+      formData.append('files', file)
+    }
+    return post<TestcaseBatchReport>(
       `/data-import/testcases/upload?project_id=${projectId}`,
       formData,
       { headers: { 'Content-Type': 'multipart/form-data' } }
