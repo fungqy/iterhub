@@ -132,20 +132,30 @@ defineExpose({ resize: handleResize })
 
 <template>
   <Card class="ds-card ds-trend-card">
-    <template #title>{{ title }}</template>
-    <template #subtitle>
-      <div class="flex flex-wrap items-center gap-3">
-        <span
-          v-for="item in legendItems"
-          :key="item.name"
-          class="flex items-center gap-2"
-        >
+    <!-- 图例与标题同一行(2026-09-21 用户要求):标题靠左、图例靠右,中间由 flex 撑开。
+         ⚠ 图例原先独占 #subtitle 一行,整卡因此多出一个 caption 间距 + 一行小字;
+           移进标题行后那份高度就不再存在(卡盒 304 → 274,见下方画布注释),
+           所以这里**不能**再保留 #subtitle 槽 —— 留着等于把省下的空间又还回去。
+         ⚠ 图例字号必须显式给 .ds-meta:它此前是 .p-card-subtitle 的 0.875rem,
+           进了标题行就没有那层样式了,靠继承会变成标题的 1rem。
+         ⚠ flex-wrap 是必需的:窄卡上「故障平均解决时长 + 两个图例项」会顶到一行放不下,
+           换行后图例落到标题下方(退化成改动前的样子),而不是把卡片内容挤出边界。 -->
+    <template #title>
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <span>{{ title }}</span>
+        <div class="flex flex-wrap items-center gap-3 ds-meta">
           <span
-            class="inline-block w-2 h-2 rounded-full"
-            :style="{ background: item.color }"
-          ></span>
-          {{ item.name }}
-        </span>
+            v-for="item in legendItems"
+            :key="item.name"
+            class="flex items-center gap-2"
+          >
+            <span
+              class="inline-block w-2 h-2 rounded-full"
+              :style="{ background: item.color }"
+            ></span>
+            {{ item.name }}
+          </span>
+        </div>
       </div>
     </template>
     <template #content>
@@ -164,7 +174,19 @@ defineExpose({ resize: handleResize })
              (262.5 → 210)。不含标题与内边距 —— 那两项由全站 token 推导(见 components.scss
              的 .ds-card .p-card-body padding 与 .ds-card .p-card-title),不为单个页面破例。
              故卡盒实测 356.5 → 304(降 14.7%),而不是跟着也降五分之一。
-             只改这一处 —— grid 的 top/bottom 是百分比,会跟着容器等比缩放。 -->
+             只改这一处 —— grid 的 top/bottom 是百分比,会跟着容器等比缩放。
+             ⚠ 2026-09-21 图例移进标题行后(见模板)卡盒再降一档,推算 304 → 274:
+               少的正是原来那行图例 = caption 间距 8px + 图例行 ~21px(0.875rem × 1.5);
+               标题行本身不变高 —— 图例字号(14)小于标题(16)且两者行高同源,
+               并排后行高仍由标题决定,图例塞得进标题的行盒里。 */
+        <!-- ⚠ 同排的「故障重开数」卡必须跟着一起矮,否则本图会被 grid 拉伸:
+             [故障重开数 | 故障平均解决时长] 同属一行,行高由较高的那张决定 ——
+             本图矮了而邻卡没矮,本图就被拉到邻卡的高度、画布下方多出空白。
+             故 2026-09-21 用户同时要求删掉重开数卡的副标题(「多次 = 重开 N 次及以上」),
+             两张卡各矮一档(各自少掉 caption 间距 8 + 一行小字 ~21):
+             本图 ≈274,重开数卡 ≈271(它的内容区 207 ≈ 本图画布 210,是原本就成立的口径)。
+             行高于是仍由本图决定,四张卡底边齐平、没有拉伸空白。
+             ⚠ 改本图画布高、或改重开数卡的副标题 / 行距前,先把这一行的联动算一遍。 -->
         <!-- ds-chart-static:本图已不可点(见 script 顶部说明),该类把光标钉回箭头。
              ⚠ 不挂它的话,鼠标移到柱子 / 折线 / 面积上仍是手型 —— 那是 zrender 图元的
                 默认 cursor='pointer',不是我们写的样式(成因见 components.scss 该规则处)。

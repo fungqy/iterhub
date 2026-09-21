@@ -22,7 +22,7 @@ const METRIC_HELP: Record<string, string> = {
   bug: '本次迭代的故障数量。',
   bugPerMember: '每个成员的平均故障数量,衡量人均故障负荷。',
   avgBug: '故障从开发到测试完成的平均工作日时长。',
-  reopen: '被重开过的故障数与故障总数的比例。',
+  reopen: '被重开过的故障数与故障总数的比例。\n\n点击可查看该迭代被重开的故障列表。',
   unplanned: 'Sprint激活后新增的故事数量与故事总数的比例。',
   avgStory: '故事从开始到完成的平均工作日时长。',
   caseCount: '本次迭代的用例总数。',
@@ -42,9 +42,11 @@ const METRIC_HELP: Record<string, string> = {
 //    用例覆盖率同源,故事数为 0 时整卡走预留态。
 // 3. 卡片顺序:投入规模(人/时长/工时)→ 产出(故事/任务/用例)→ 质量(故障/重开/时长)。
 // 4. 可下钻的卡一律把意图 emit 给父级,本组件不持有任何弹窗(同一个弹窗挂两份实例会
-//    出现两套互不相干的加载状态)。2026-09-21 起这里是「故事数 / 故障数 / 故障平均
-//    解决时长」三种下钻的**唯一入口** —— 质量报表页上那三张同名趋势图已改为纯展示
-//    (见 Reports.vue),别再让图也能点。
+//    出现两套互不相干的加载状态)。2026-09-21 起本弹窗还是四种下钻的**唯一入口**:
+//      故事数 → 燃尽图、故障数 → 故障分布统计、故障平均解决时长 → 时长明细、
+//      故障重开率 → 故障重开列表。
+//    质量报表页上那三张同名趋势图与「故障重开数」分布表都已改为纯展示(见 Reports.vue),
+//    别再让页面上的图 / 表也能点开同一份明细。
 const props = defineProps<{
   visible: boolean
 }>()
@@ -65,8 +67,8 @@ const emit = defineEmits<{
   'open-unplanned-stories': [sprintId: number]
   /** 请求打开「团队成员明细」弹窗(由父级复用既有 TeamMembersDialog) */
   'open-team-members': [sprintId: number]
-  /** 请求打开「故障重开分布(按成员)」弹窗(由父级复用既有 ReopenMembersDialog) */
-  'open-reopen-members': [sprintId: number]
+  /** 请求打开「故障重开列表」弹窗(由父级复用既有 ReportReopenDialog) */
+  'open-reopen-bugs': [sprintId: number]
   /** 请求打开「工时不一致明细」弹窗(由父级复用 WorktimeMismatchDialog) */
   'open-worktime-mismatch': [sprintId: number]
 }>()
@@ -302,12 +304,15 @@ function openTeamMembers() {
   if (s && s.member_count > 0) emit('open-team-members', s.sprint_id)
 }
 
-/** 故障重开率卡 → 「故障重开分布(按成员)」弹窗(父级复用 ReopenMembersDialog)。
+/** 故障重开率卡 → 「故障重开列表」弹窗(父级复用 ReportReopenDialog)。
  *  与 openBugDetail 同构:本组件不持有弹窗,只递意图上去;
- *  无重开故障(count 为 0)时不下钻 —— 那时卡片退回 div,本就不是可点控件。 */
-function openReopenMembers() {
+ *  无重开故障(count 为 0)时不下钻 —— 那时卡片退回 div,本就不是可点控件,
+ *  点开也只会看到「该迭代暂无重开故障」。
+ *  (2026-09-21 前这里指向「故障重开分布(按成员)」,那份明细已无入口:
+ *   重开列表本身带「开发」与「重开次数」两列,按成员的分布在其中即可读出来。) */
+function openReopenBugs() {
   const s = summary.value
-  if (s && s.bug_reopen_count > 0) emit('open-reopen-members', s.sprint_id)
+  if (s && s.bug_reopen_count > 0) emit('open-reopen-bugs', s.sprint_id)
 }
 
 /** 工时卡 → 「工时不一致明细」弹窗(父级复用 WorktimeMismatchDialog)。
@@ -556,14 +561,15 @@ function openWorktimeMismatch() {
         </component>
 
         <!-- 故障重开率:有重开故障(count>0)时整卡是可下钻控件(button),
-             下钻到「故障重开分布(按成员)」;无重开故障(count=0)或该卡为预留态时退回 div,
-             避免留下一个可点却空转的控件。结构与「计划外故事占比」卡同构。 -->
+             下钻到「故障重开列表」(该迭代重开过的故障,带重开次数);无重开故障(count=0)
+             或该卡为预留态时退回 div,避免留下一个可点却空转的控件。
+             结构与「计划外故事占比」卡同构。 -->
         <component
           :is="summary.bug_reopen_count > 0 ? 'button' : 'div'"
           v-bind="summary.bug_reopen_count > 0 ? { type: 'button' } : {}"
           class="ds-metric"
           :class="summary.bug_reopen_rate === null ? 'is-reserved' : (summary.bug_reopen_count > 0 ? 'is-bar tone-danger is-clickable' : 'is-bar tone-danger')"
-          @click="openReopenMembers"
+          @click="openReopenBugs"
         >
           <span class="ds-metric-label">故障重开率<MetricHelp :help="METRIC_HELP.reopen" /></span>
           <span class="ds-metric-value">{{ rateToPercent(summary.bug_reopen_rate) }}</span>
@@ -572,7 +578,7 @@ function openWorktimeMismatch() {
               <span :style="{ width: rateToBarWidth(summary.bug_reopen_rate) }"></span>
             </div>
             <span class="ds-metric-sub">
-              重开 {{ summary.bug_reopen_count }} / 故障 {{ summary.bug_count }}<template v-if="summary.bug_reopen_count > 0"> · 点击查看成员分布</template>
+              重开 {{ summary.bug_reopen_count }} / 故障 {{ summary.bug_count }}<template v-if="summary.bug_reopen_count > 0"> · 点击查看重开故障列表</template>
             </span>
           </template>
           <span v-else class="ds-metric-badge">该迭代无故障</span>

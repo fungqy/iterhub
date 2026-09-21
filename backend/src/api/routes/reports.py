@@ -868,7 +868,14 @@ async def get_reopen_bugs(
     已经只留下「重开」这一种流转,分组内 remaining 的行数就是重开次数。
 
     口径与 /project-metrics 的 reopen_once/twice/many 严格同源(同一 JOIN、同一 WHERE、
-    同一分组键),所以界面上「点击某一档 → 弹窗里正好是那一档的故障」在数学上恒成立。
+    同一分组键)。
+
+    返回字段里两处值得说明:
+      · tag —— 由 parse_tag 把 bug_reason 的首段翻成规范词,与 /bugs/list 的「标签」同一出口。
+        ⚠ 不要把 RDM_TAG_ALIAS 搬到前端重算:它是本模块的口径,复制一份必然漂移。
+      · bug_reason —— 即界面上「原因及分析」列的正文(RDM 口径下它与 /bugs/list 的
+        reason_analysis 是同一个值:那条查询就是 `bug_reason as reason_text`),
+        故前端直接用它,不再多返回一个同值的 reason_analysis。
     """
     with get_session() as session:
         query = text("""
@@ -906,8 +913,10 @@ async def get_reopen_bugs(
                 "priority": row[5] or '',
                 "bug_reason": row[6] or '',
                 "resolution": row[7] or '',
-                # 重开次数:前端按此把明细分档(1 次 / 2 次 / ≥3 次),
-                # 与卡片上的三个数字同一口径 —— 单一数据源,不在前端另行计数
+                # 标签:与 /bugs/list 同一出口。RDM 的 bug_reason 形如
+                # '代码实现 - 代码逻辑问题',取 '-' 前一段再过 RDM_TAG_ALIAS 翻成规范词。
+                "tag": parse_tag(row[6], 'RDM'),
+                # 重开次数:与卡片上的三个数字同一口径 —— 单一数据源,不在前端另行计数
                 "reopen_times": int(row[8] or 0),
             })
 
@@ -1447,7 +1456,9 @@ async def get_sprint_reopen_members(
     成员身份取故障修复人 COALESCE(NULLIF(bug_solver,''), assignee),与
       /sprint-members 的故障归属口径一致(实测故障 assignee 与 bug_solver 零重合,
       按 assignee 统计会全挤在提单测试一人名下)。
-    ⚠ 「多次」下界 = 3,必须与前端 reopenBuckets.ts 的 REOPEN_MANY_MIN 保持一致。
+    ⚠ 「多次」下界 = 3,与 /project-metrics 的 reopen_many 同口径。
+      (2026-09-21 起前端不再展示这条边界:重开数卡的副标题已按用户要求删除,
+       界面上只留列头「重开多次」,前端那份常量随之删掉 —— 一致性从此只由后端各处判定对齐。)
 
     只返回「至少有一条重开故障」的成员 —— 内层查询只含被重开的故障,没有重开记录的
     成员自然不出现(满足「没有数据的成员不展示」);若迭代整体无重开故障(该卡仅在

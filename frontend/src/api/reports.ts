@@ -24,18 +24,33 @@ export interface BugListItem {
   image_count: number
 }
 
+/**
+ * 一只被重开过的故障(一个 Sprint 一行,来自 /reports/bugs/reopen)。
+ *
+ * 只有 RDM 故障会出现在这里(重开次数取自 rdm_bug_changelog 的流转),故没有 source 字段。
+ */
 export interface ReopenBugItem {
+  /** 行序号,由后端按「优先级 → 编码」的排序结果给出 */
   index: number
   issue_key: string
   issue_name: string
+  /** 开发(修复人):后端取 bug_maker,缺失时回落 reporter,再兜底「其他」 */
   bug_maker: string
+  /**
+   * 原因及分析。RDM 口径下这就是 rdm_issue.bug_reason 全文 —— 与「故障明细」
+   * (/bugs/list)的 reason_analysis 是同一个值(那条查询也是 `bug_reason as reason_text`),
+   * 故这里直接复用字段,不再多返回一个同名的 reason_analysis。
+   */
+  bug_reason: string
+  priority: string
+  /** 标签:由后端 parse_tag 把「原因」首段归一到规范词,与 /bugs/list 的 tag 同一出口 */
+  tag: string
+  /** 该故障被重开的次数(≥1):同一只故障 '待测试 -> 处理中' 的流转次数 */
+  reopen_times: number
+  /** 以下三项接口仍返回,本版重开列表不展示(留给后续列或别处复用) */
   reporter: string
   bug_type: string
-  priority: string
-  bug_reason: string
   resolution: string
-  /** 该故障被重开的次数(≥1)。弹窗据此分档过滤,档位边界见 reopenBuckets.ts */
-  reopen_times: number
 }
 
 export interface SprintMetricsItem {
@@ -131,14 +146,12 @@ export interface SprintMemberItem {
 }
 
 /**
- * 单个成员在某 Sprint 内的故障重开分布(「故障重开率」卡下钻用)。
+ * 单个成员在某 Sprint 内的故障重开分布。
  *
- * 口径(与后端 /reports/sprint-reopen-members 的 docstring 一致):
- * - 仅含「至少有一条重开故障」的成员(没有重开的成员不返回);
- * - 三档(1 次 / 2 次 / ≥3 次)与 /bugs/reopen、/project-metrics 同源,
- *   三档之和恒等于该成员的故障重开数,所有成员之和恒等于概览的 bug_reopen_count;
- * - 成员身份取故障修复人(与「团队成员明细」的故障归属口径一致)。
- * reopen_total 为三档之和,供数据自洽校验(界面不单独展示)。
+ * ⚠ 自 2026-09-21 起前端已无消费方:原先它是「故障重开率」卡的下钻(ReopenMembersDialog),
+ *   该卡的点击现在打开「故障重开列表」(ReportReopenDialog),而按成员的分布在那份列表里
+ *   由「开发」+「重开次数」两列直接可读。接口 /reports/sprint-reopen-members 仍在后端保留,
+ *   故类型也一并留着 —— 要用回那张表时把类型与 api 方法接上即可。
  */
 export interface SprintReopenMemberItem {
   member: string
@@ -146,7 +159,7 @@ export interface SprintReopenMemberItem {
   reopen_once: number
   /** 该成员被重开恰好 2 次的故障数 */
   reopen_twice: number
-  /** 该成员被重开 ≥3 次的故障数(「多次」下界见 reopenBuckets.ts 的 REOPEN_MANY_MIN) */
+  /** 该成员被重开 ≥3 次的故障数(「多次」下界 = 3,与后端 /sprint-reopen-members 的判定同源) */
   reopen_many: number
   /** 该成员被重开的故障总数(= reopen_once + reopen_twice + reopen_many) */
   reopen_total: number
@@ -397,7 +410,14 @@ export const reportsApi = {
     return get<SprintMemberItem[]>('/reports/sprint-members', { sprint_id: sprintId })
   },
 
-  /** 指定 Sprint 各成员的故障重开分布(「故障重开率」卡下钻用)。仅含有重开记录的成员 */
+  /**
+   * 指定 Sprint 各成员的故障重开分布。仅含有重开记录的成员。
+   *
+   * ⚠ 2026-09-21 起**暂无调用方**:「故障重开率」卡改为下钻「故障重开列表」
+   *   (getReopenBugs + ReportReopenDialog),不再打开「按成员分布」那张表。
+   *   保留此方法与上面的类型,是为了和后端仍注册着的 /reports/sprint-reopen-members
+   *   保持一一对应(api/ 层就是后端契约的镜像);要恢复那张表,才需要重新写组件。
+   */
   getSprintReopenMembers(sprintId: number): Promise<SprintReopenMemberItem[]> {
     return get<SprintReopenMemberItem[]>('/reports/sprint-reopen-members', { sprint_id: sprintId })
   },

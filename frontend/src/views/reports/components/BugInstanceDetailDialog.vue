@@ -5,6 +5,7 @@ import type { DocBugImageMeta, DocBugRecord } from '@/api/dataImport'
 import { dataImportApi, docBugImageUrl } from '@/api/dataImport'
 import { useSprintScope } from '@/composables/useSprintScope'
 import type { TagSeverity } from '@/constants/taskMeta'
+import { prioritySeverity } from '@/constants/priorityMeta'
 import { MAXIMIZED_DIALOG_PT } from '@/constants/dialogPt'
 import Dialog from 'primevue/dialog'
 import Drawer from 'primevue/drawer'
@@ -162,20 +163,10 @@ const imageMeta = computed(() => {
 })
 
 /**
- * 优先级色档。RDM 与文档故障用的是两套档位(致命/严重/一般/轻微/优化 与 极高/高/中/低),
- * 这里都把各自的档位显式写出来 —— 缺一条就会落到 secondary 的灰底,看起来像"没级别"。
+ * 优先级色档不再定义在这里 —— 已收口到 constants/priorityMeta.ts
+ * (原先 BugListDialog 与本文件各写一份同样的 9 个键;两套词表 RDM 的
+ *  致命/严重/一般/轻微/优化 与文档故障的 极高/高/中/低 都在那份里)。
  */
-const PRIORITY_SEVERITY: Record<string, 'danger' | 'warn' | 'info' | 'success' | 'secondary'> = {
-  致命: 'danger',
-  严重: 'warn',
-  一般: 'info',
-  轻微: 'success',
-  优化: 'secondary',
-  极高: 'danger',
-  高: 'warn',
-  中: 'info',
-  低: 'success',
-}
 
 /**
  * 「处理状态」色档。
@@ -458,7 +449,7 @@ const longSections = computed(() => {
  */
 function detailSeverityOf(value: string): TagSeverity | null {
   if (value === '—') return null
-  return PRIORITY_SEVERITY[value] ?? 'secondary'
+  return prioritySeverity(value)
 }
 
 function selectImage(i: number): void {

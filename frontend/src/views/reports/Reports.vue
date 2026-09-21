@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, onUnmounted, computed, nextTick } from 'vue'
-import { reportsApi, type AvgTimeDeveloperItem, type ProjectOption, type ReopenBugItem, type SprintMemberItem, type SprintMetricsItem, type SprintOption, type SprintReopenMemberItem, type UnplannedStoryItem, type WorktimeMismatchResponse } from '@/api/reports'
+import { reportsApi, type AvgTimeDeveloperItem, type ProjectOption, type ReopenBugItem, type SprintMemberItem, type SprintMetricsItem, type SprintOption, type UnplannedStoryItem, type WorktimeMismatchResponse } from '@/api/reports'
 import { useNotify } from '@/utils/notify'
 import { formatDate } from '@/utils/datetime'
 import { sprintStateText, sprintStateSeverity, sprintIsActive } from '@/constants/sprintMeta'
@@ -11,11 +11,9 @@ import Tag from 'primevue/tag'
 import MetricsTrendChart from './components/MetricsTrendChart.vue'
 import ReopenDistributionCard from './components/ReopenDistributionCard.vue'
 import ReportReopenDialog from './components/ReportReopenDialog.vue'
-import { type ReopenBucket } from './components/reopenBuckets'
 import AvgTimeDevelopersDialog from './components/AvgTimeDevelopersDialog.vue'
 import SprintSummaryDialog from './components/SprintSummaryDialog.vue'
 import TeamMembersDialog from './components/TeamMembersDialog.vue'
-import ReopenMembersDialog from './components/ReopenMembersDialog.vue'
 import UnplannedStoriesDialog from './components/UnplannedStoriesDialog.vue'
 import WorktimeMismatchDialog from './components/WorktimeMismatchDialog.vue'
 import BugDetailDialog from './BugDetailDialog.vue'
@@ -196,38 +194,38 @@ const storySeries = computed(() => storySeriesOf(metricsLatest.value))
 const bugSeries = computed(() => bugSeriesOf(metricsLatest.value))
 const timeSeries = computed(() => timeSeriesOf(metricsLatest.value))
 
-// ── 下钻:入口一律在「卡 / 表」上,趋势图不再可点 ────────────────────
-// 三张趋势图(故事数 / 故障数 / 故障平均解决时长)已改为纯展示;对应的下钻统一由
-// SprintSummaryDialog 的同名指标卡派发(见模板里那几行 @open-*):
-//   故事数卡 → 故事燃尽图(BurndownDialog)         ← openBurndown
-//   故障数卡 → 故障分布统计(BugDetailDialog)       ← openBugDetailBySprint
+// ── 下钻:入口一律在「卡 / 表」之外的那张概览弹窗上 ──────────────────
+// 页面上原来的四处下钻(三张趋势图 + 「故障重开数」分布表)已全部改为纯展示;
+// 对应的明细统一由 SprintSummaryDialog 的指标卡派发(见模板里那几行 @open-*):
+//   故事数卡 → 故事燃尽图(BurndownDialog)              ← openBurndown
+//   故障数卡 → 故障分布统计(BugDetailDialog)            ← openBugDetailBySprint
 //   故障平均解决时长卡 → 时长明细(AvgTimeDevelopersDialog) ← openAvgTimeDevelopers
-// 「故障重开数」本就是表格,入口在表内(见下方注释)。
+//   故障重开率卡 → 故障重开列表(ReportReopenDialog)      ← openReopenBugs
+// 一句话:页面负责「趋势 / 分布」,弹窗负责「明细」,同一份明细不再有第二条入口。
 
-// ── 故障重开数:已由趋势图改为分布表 ─────────────────────────────
+// ── 故障重开数:已由趋势图改为分布表(纯展示)──────────────────────
 // 原来这里装配的是「柱 + 线」的 reopenSeries(字段 bug_reopen_count)。换掉的理由是那条
 // 图只能表达「有几只故障被重开过」,重开 1 次与 5 次在图上都是 +1;表格才能把次数拆开。
 // 数据仍是同一批 metricsLatest(与其余三张图同窗),只是字段换成 reopen_once/twice/many
 // —— 后端就是由同一个分组查询派生 bug_reopen_count 的,故表格「合计」= 原来图上那个值。
-// 下钻沿用 ReportReopenDialog:点行(或「合计」数字)打开该 Sprint 的重开明细。
+// ⚠ 2026-09-21:该表不再可点(原先点档位数字 / 整行会打开重开明细)。明细改由概览的
+//   「故障重开率」卡打开(见下方 openReopenBugs)——「Sprint 概览」也是「正在看哪个迭代」
+//   的唯一来源,从那里点进去不存在「点错迭代」的可能。
 
+// ── 故障重开列表:概览「故障重开率」卡的下钻 ──
 const reopenDialogVisible = ref(false)
 const reopenBugs = ref<ReopenBugItem[]>([])
 const loadingReopenBugs = ref(false)
-// 弹窗当前档位。卡片点「重开 1 次 / 2 次 / 多次」某一格带入对应档位,点「合计」或整行带入
-// 'all'(全部)。状态放在这里而不是弹窗内部:弹窗内的分段控件要能改它,而同一档位在两次
-// 点击之间「值未变」,自存状态会导致弹窗停留在上次手动切过的档位上(见弹窗内注释)。
-const reopenBucket = ref<ReopenBucket>('all')
 
-async function openReopenBySprint(sprintId: unknown, bucket: ReopenBucket = 'all') {
+async function openReopenBugs(sprintId: unknown) {
   const sid = setActiveSprint(sprintId)
-  reopenBucket.value = bucket
   reopenDialogVisible.value = true
   if (sid == null) return
   loadingReopenBugs.value = true
   try {
-    const res = await reportsApi.getReopenBugs(sid)
-    reopenBugs.value = res
+    // 该 Sprint 的**全部**重开故障(每只一条,由后端按重开次数聚合)。
+    // 分档筛选已随「重开数」卡的下钻一起移除:重开次数现在就是列表里的一列。
+    reopenBugs.value = await reportsApi.getReopenBugs(sid)
   } catch {
     notifyError('加载故障重开列表失败')
   } finally {
@@ -317,25 +315,11 @@ async function openTeamMembers(sprintId: unknown) {
   }
 }
 
-// ── 故障重开分布(按成员):点击概览「故障重开率」卡打开该 Sprint 各成员的重开分布 ──
-const reopenMembersDialogVisible = ref(false)
-const reopenMembers = ref<SprintReopenMemberItem[]>([])
-const loadingReopenMembers = ref(false)
-
-async function openReopenMembers(sprintId: unknown) {
-  const sid = setActiveSprint(sprintId)
-  reopenMembersDialogVisible.value = true
-  if (sid == null) return
-  loadingReopenMembers.value = true
-  try {
-    const res = await reportsApi.getSprintReopenMembers(sid)
-    reopenMembers.value = res
-  } catch {
-    notifyError('加载故障重开成员分布失败')
-  } finally {
-    loadingReopenMembers.value = false
-  }
-}
+// ⚠ 「故障重开分布(按成员)」的下钻已于 2026-09-21 移除:它原先挂在概览的「故障重开率」卡上,
+//   该卡现在打开的是「故障重开列表」——列表里带「开发」与「重开次数」两列,按成员看分布
+//   在那份列表里直接可读,不需要再来一张只按成员聚合的表。ReopenMembersDialog 组件与
+//   它对应的 api 调用一并删除;后端 /reports/sprint-reopen-members 仍注册着(见 api/reports.ts
+//   该方法的注释),要用回那张表时把组件与这一段接线恢复即可。
 
 const projects = ref<ProjectOption[]>([])
 
@@ -635,9 +619,10 @@ onMounted(() => {
       <p v-else-if="!loadingSprintTimeline" class="ds-meta">暂无已激活的 Sprint</p>
     </div>
 
-    <!-- 三张趋势图**纯展示、不可点**(2026-09-21 用户要求)。原先点柱子分别打开
-         燃尽图 / 故障分布 / 时长明细,与「Sprint 概览」弹窗里的同名指标卡是两条
-         重复入口;现在只留概览那一处(见下方 SprintSummaryDialog 的 @open-*)。 -->
+    <!-- 四张卡(三张趋势图 + 「故障重开数」分布表)**纯展示、不可点**(2026-09-21 用户要求)。
+         原先点柱子 / 点数字分别打开燃尽图 / 故障分布 / 时长明细 / 重开明细,与「Sprint 概览」
+         弹窗里的同名指标卡是两条重复入口;现在只留概览那一处(见下方 SprintSummaryDialog
+         的 @open-*)。 -->
     <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
       <MetricsTrendChart
         ref="storyChartRef"
@@ -656,12 +641,10 @@ onMounted(() => {
         :loading="loadingProjectMetrics"
       />
       <!-- 故障重开数:表格而非趋势图。列的三个档位(1 次 / 2 次 / 多次)由后端按
-           每只故障的重开次数分桶给出;点某一格的数字 → 弹窗只列该档的故障,
-           点「合计」或整行 → 该 Sprint 的全部重开故障。 -->
+           每只故障的重开次数分桶给出。⚠ 纯展示,不再可点(明细入口见概览的「故障重开率」卡)。 -->
       <ReopenDistributionCard
         :metrics="metricsLatest"
         :loading="loadingProjectMetrics"
-        @select="openReopenBySprint"
       />
       <MetricsTrendChart
         ref="timeChartRef"
@@ -683,10 +666,9 @@ onMounted(() => {
     <!-- Story Burndown Dialog -->
     <BurndownDialog v-model:visible="burndownDialogVisible" />
 
-    <!-- Reopen Bugs Dialog（档位由卡片上被点的格子带入,弹窗内亦可切换）-->
+    <!-- Reopen Bugs Dialog（概览「故障重开率」卡下钻：该 Sprint 全部重开故障,行点击开抽屉）-->
     <ReportReopenDialog
       v-model:visible="reopenDialogVisible"
-      v-model:bucket="reopenBucket"
       :reopen-bugs="reopenBugs"
       :loading="loadingReopenBugs"
     />
@@ -698,9 +680,10 @@ onMounted(() => {
       :loading="loadingAvgTimeDevelopers"
     />
 
-    <!-- Sprint Summary Dialog(时间轴点位点击)—— 以下三种下钻的**唯一入口**:
-         故事数 → 燃尽图、故障数 → 故障分布、故障平均解决时长 → 时长明细。
-         质量报表页上的对应趋势图已不再可点(见上方趋势图区域的注释)。 -->
+    <!-- Sprint Summary Dialog(时间轴点位点击)—— 以下四种下钻的**唯一入口**:
+         故事数 → 燃尽图、故障数 → 故障分布、故障平均解决时长 → 时长明细、
+         故障重开率 → 故障重开列表。
+         质量报表页上的对应趋势图 / 分布表已全部不再可点(见上方那几张卡的注释)。 -->
     <SprintSummaryDialog
       v-model:visible="summaryDialogVisible"
       @open-burndown="openBurndown"
@@ -708,7 +691,7 @@ onMounted(() => {
       @open-avg-time="openAvgTimeDevelopers"
       @open-unplanned-stories="openUnplannedStories"
       @open-team-members="openTeamMembers"
-      @open-reopen-members="openReopenMembers"
+      @open-reopen-bugs="openReopenBugs"
       @open-worktime-mismatch="openWorktimeMismatch"
     />
 
@@ -724,13 +707,6 @@ onMounted(() => {
       v-model:visible="teamMembersDialogVisible"
       :members="teamMembers"
       :loading="loadingTeamMembers"
-    />
-
-    <!-- Reopen Members Dialog（故障重开率卡下钻）-->
-    <ReopenMembersDialog
-      v-model:visible="reopenMembersDialogVisible"
-      :members="reopenMembers"
-      :loading="loadingReopenMembers"
     />
 
     <!-- Worktime Mismatch Dialog（工时卡下钻：仅当投入 > 计划时可点开）-->

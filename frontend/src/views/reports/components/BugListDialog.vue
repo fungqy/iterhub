@@ -2,6 +2,7 @@
 import type { BugListItem } from '@/api/reports'
 import { TH } from '@/constants/tableHeaders'
 import { MAXIMIZED_DIALOG_PT } from '@/constants/dialogPt'
+import { prioritySeverity } from '@/constants/priorityMeta'
 import { RDM_BROWSE_URL } from './charts'
 import Dialog from 'primevue/dialog'
 import DataTable from 'primevue/datatable'
@@ -47,20 +48,6 @@ const emit = defineEmits<{
 const detailVisible = ref(false)
 const detailKey = ref<string | null>(null)
 const detailSource = ref<'RDM' | 'DOC'>('DOC')
-
-const prioritySeverityMap: Record<string, 'danger' | 'warn' | 'info' | 'success' | 'secondary'> = {
-  '致命': 'danger',
-  '严重': 'warn',
-  '一般': 'info',
-  '轻微': 'success',
-  '优化': 'secondary',
-  // 文档故障表用的是另一套档位(极高/高/中/低),与 RDM 的 致命/严重/一般/轻微 并存;
-  // 两套都写在这里,各自的行才能取到自己的映射,而不会落到 secondary 的灰底。
-  '极高': 'danger',
-  '高': 'warn',
-  '中': 'info',
-  '低': 'success',
-}
 
 /** 有编码的行才可点。判定与点击处理器同源,不会「看着可点却点不动」 */
 function rowClass(row: BugListItem): string {
@@ -125,7 +112,7 @@ function onRowClick(event: { data: BugListItem }): void {
       <Column field="priority" :header="TH.priority" class="ds-nowrap" style="width: 6.5rem">
         <template #body="{ data }">
           <Tag
-            :severity="prioritySeverityMap[data.priority] ?? 'secondary'"
+            :severity="prioritySeverity(data.priority)"
             :value="data.priority"
           />
         </template>

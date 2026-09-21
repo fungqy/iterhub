@@ -9,7 +9,6 @@ import Select from 'primevue/select'
 import MultiSelect from 'primevue/multiselect'
 import Button from 'primevue/button'
 import Tag from 'primevue/tag'
-import Message from 'primevue/message'
 import { TASK_TYPE_LABELS, TASK_TYPE_OPTIONS } from '@/constants/taskMeta'
 import { useNotify } from '@/utils/notify'
 
