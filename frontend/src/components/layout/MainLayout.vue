@@ -73,13 +73,13 @@ function toggleCollapse() {
              不另存一份 src/assets 副本,避免同一标记两处漂移(改 favicon 忘改侧栏)。
              展开态:标记纯粹装饰,可读名由右侧文字提供 → alt="";
              折叠态:文字被 v-if 移除,标记成为唯一内容 → 此时 alt 提供可读名,
-             保证两种状态下该链接区域的名称都是「迭代信息看板」。 -->
+             保证两种状态下该链接区域的名称都是「Sprint Better」。 -->
         <img
           class="app-brand-mark"
           :src="brandMark"
-          :alt="isCollapse ? '迭代信息看板' : ''"
+          :alt="isCollapse ? 'Sprint Better' : ''"
         />
-        <span v-if="!isCollapse" class="app-brand-name">迭代信息看板</span>
+        <span v-if="!isCollapse" class="app-brand-name">Sprint Better</span>
       </div>
       <nav class="app-nav">
         <router-link

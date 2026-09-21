@@ -41,7 +41,7 @@ async function handleLogin() {
 <template>
   <div class="center-page">
     <Card class="ds-card w-[min(420px,92vw)]">
-      <template #title>迭代信息看板</template>
+      <template #title>Sprint Better</template>
       <template #subtitle></template>
       <template #content>
         <form class="flex flex-col gap-4" @submit.prevent="handleLogin">

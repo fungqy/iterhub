@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 from sqlalchemy.pool import QueuePool
 
-from db.config import get_dsn
+from db.config import get_connect_args, get_dsn
 
 # 加载环境变量
 load_dotenv()
@@ -40,13 +40,14 @@ class DbOperator:
 
     @staticmethod
     def get_engine():
-        """获取全局数据库引擎(单例,带连接池 + 探活 + 回收)"""
+        """获取全局数据库引擎(单例,带连接池 + 探活 + 回收 + 建连超时)"""
         global _engine
         if _engine is None:
             with _engine_lock:
                 if _engine is None:
                     _engine = create_engine(
                         get_dsn(),
+                        connect_args=get_connect_args(),
                         poolclass=QueuePool,
                         pool_size=10,
                         max_overflow=10,

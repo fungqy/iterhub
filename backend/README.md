@@ -16,7 +16,7 @@
 pip install -e .
 
 # 启动服务（默认 0.0.0.0:8000）
-./scripts/run.sh
+python scripts/run.py
 
 # 或直接用 uvicorn
 uvicorn src.api.main:app --host 0.0.0.0 --port 8000
@@ -54,10 +54,14 @@ uvicorn src.api.main:app --host 0.0.0.0 --port 8000
 
 ### 健康检查
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/` | 服务健康检查 |
-| GET | `/health` | 健康状态 |
+| 方法 | 路径 | 状态码 | 说明 |
+|------|------|--------|------|
+| GET | `/` | 200 | 进程基本信息 |
+| GET | `/livez` | 200 | **存活探针**:只证明进程自身还活着,不碰任何外部依赖(livenessProbe 用) |
+| GET | `/health` | 200 / 503 | **就绪探针**:DB ping + 调度器状态,任一不可用即 503(readinessProbe、Docker HEALTHCHECK 用) |
+
+> ⚠ 两者分工不可互换:livenessProbe 指向 `/health` 会让 MySQL 抖动升级为容器反复重启;
+> readinessProbe 指向 `/livez` 则会让库已挂掉的实例继续接流量。
 
 ## 环境变量
 
@@ -90,8 +94,8 @@ After=network.target
 [Service]
 Type=simple
 User=your_user
-WorkingDirectory=/path/to/iterhub
-ExecStart=/path/to/iterhub/scripts/run.sh
+WorkingDirectory=/path/to/iterhub/backend
+ExecStart=/usr/bin/env python3 /path/to/iterhub/backend/scripts/run.py
 Restart=always
 
 [Install]

@@ -8,7 +8,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import QueuePool
 
-from db.config import get_dsn
+from db.config import get_connect_args, get_dsn
 
 load_dotenv()
 
@@ -30,9 +30,10 @@ def validate_db_config(config):
 
 
 def get_engine():
-    """创建数据库引擎(带连接池 + 探活 + 回收)"""
+    """创建数据库引擎(带连接池 + 探活 + 回收 + 建连超时)"""
     return create_engine(
         get_dsn(),
+        connect_args=get_connect_args(),
         poolclass=QueuePool,
         pool_size=10,
         max_overflow=10,

@@ -105,14 +105,19 @@ spec:
         #    在 nginx 放行之后被后端 413 挡回,现象和"文件损坏"一模一样。
         - name: MAX_UPLOAD_BYTES
           value: "419430400"
+        # ⚠ liveness 必须探 /livez(只证明进程活着),**不能**探 /health:
+        #    /health 会在 MySQL/调度器不可用时返回 503,而 livenessProbe 失败
+        #    会让 kubelet 杀掉并重启容器 —— 数据库抖动会被放大成容器反复重启
+        #    (进程内 APScheduler 状态一并丢失),且库不恢复就永远起不来。
         livenessProbe:
           httpGet:
-            path: /health
+            path: /livez
             port: 8000
           initialDelaySeconds: 30
           periodSeconds: 10
           timeoutSeconds: 5
           failureThreshold: 5
+        # readiness 探 /health:依赖不可用 ⇒ 503 ⇒ 摘流量但不重启进程。
         readinessProbe:
           httpGet:
             path: /health

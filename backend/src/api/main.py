@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from api.routes import auth, data_import, jobs, projects, reports, sprint_filter
 from api.routes import scheduler as scheduler_routes
@@ -93,9 +94,31 @@ async def root():
     return {"status": "ok", "service": "iterhub", "version": "1.0.0"}
 
 
+@app.get("/livez", tags=["健康检查"])
+async def livez():
+    """存活探针:只回答「进程自身还活着吗」,不碰任何外部依赖。
+
+    与 /health 的分工(不可互换):
+    - /livez  → livenessProbe。必须与 MySQL / RDM / 企微**完全解耦**:否则数据库
+      抖动会让 kubelet 反复重启容器,把「可自愈的降级」放大成「整个服务下线 +
+      进程内 APScheduler 状态丢失」。
+    - /health → readinessProbe、Docker HEALTHCHECK。依赖不可用时返回 503,
+      把流量摘掉但**不重启**进程。
+
+    能正常返回 200 本身就证明事件循环仍在处理请求,故无需再做额外探测。
+    """
+    return {"status": "alive"}
+
+
 @app.get("/health", tags=["健康检查"])
 async def health():
-    """服务健康状态(深度:DB ping + 调度器状态)"""
+    """服务健康状态(深度:DB ping + 调度器状态)。
+
+    就绪语义:任一组件不可用 ⇒ **HTTP 503**;body 结构保持不变,便于既有采集端沿用。
+
+    此前无论 healthy 还是 degraded 都返回 200,导致 readinessProbe 与 Docker
+    HEALTHCHECK 永远判定成功 —— 库挂了实例照样接流量,检查形同虚设。
+    """
     from sqlalchemy import text
 
     components: dict = {"database": "unknown", "scheduler": "unknown"}
@@ -123,10 +146,15 @@ async def health():
         components["scheduler"] = f"error: {e}"
         overall_ok = False
 
-    return {
-        "status": "healthy" if overall_ok else "degraded",
-        "components": components,
-    }
+    # 未就绪用 503(Service Unavailable)而非 500:这是「暂时不可用、稍后会恢复」,
+    # 不是「服务端代码出错」。采集端据此重试/摘流量,而不是升级为代码级告警。
+    return JSONResponse(
+        status_code=200 if overall_ok else 503,
+        content={
+            "status": "healthy" if overall_ok else "degraded",
+            "components": components,
+        },
+    )
 
 
 
