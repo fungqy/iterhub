@@ -1104,6 +1104,28 @@ def _duration_days(start, end) -> int | None:
     return (end_date - start_date).days + 1
 
 
+def _workday_count(session, start, end) -> int | None:
+    """[start, end] 内落在 sys_workday 上的天数。任一为空或倒挂则返回 None。
+
+    sys_workday 是工作日的唯一源(由 holiday 任务写入),休息日 / 节假日不在表中,
+    故直接 COUNT 即为区间工作日数。与 _duration_days 同规则返回 None ——
+    「无区间可算」不是 0,前端据此渲染「—」而不是一个看起来真实的 0 天。
+    """
+    if not start or not end:
+        return None
+    start_date = start.date() if isinstance(start, datetime) else start
+    end_date = end.date() if isinstance(end, datetime) else end
+    if end_date < start_date:
+        return None
+    return int(session.execute(text("""
+        SELECT COUNT(*) FROM sys_workday
+        WHERE datestr BETWEEN :start AND :end
+    """), {
+        "start": start_date.isoformat(),
+        "end": end_date.isoformat(),
+    }).fetchone()[0] or 0)
+
+
 @router.get("/sprint-summary")
 async def get_sprint_summary(
     sprint_id: int,
@@ -1120,6 +1142,13 @@ async def get_sprint_summary(
       仅在故事上挂 developer/tester 的成员会得到 0 ——— 这种成员仍出现在 members 里,
       姓名胶囊仍在前 3 位时等于 0 任务的人被挑出来了,但因为其他成员多数有任务,
       这种情况很少见;若全员 0 任务(空迭代或全故事无子任务),按姓名稳定排序。
+    - 迭代时长:**两套区间各给一对「自然日跨度 + 工作日数」**,不混用 ——
+      计划区间 = rdm_sprint.startdate → enddate,对应 duration_days / workday_count;
+      实际区间 = activated_date → complete_date,对应 actual_days / actual_workday_count。
+      两个自然日跨度都含首尾;两个工作日数都取自 sys_workday(工作日的唯一源,
+      区间内落在该表上的天数即工作日数,休息日 / 节假日不在表中)。
+      ⚠ 迭代未完成时没有 complete_date,实际区间那一对整组返回 null(不是 0)——
+      「还没跑完」与「跑了 0 天」含义不同,混用会让卡片显示出误导性的 0。
     - 任务数:issue_type = '子任务'。本系统「任务到期提醒」即以后者为准
       (util/jira.py 的 sample_tasks)。rdm_issue 中另有 issue_type='任务' 的极少量行,
       但它是「有子任务的需求项」这类父级,与故事/子任务层级重叠,故不计入,避免重复。
@@ -1132,7 +1161,6 @@ async def get_sprint_summary(
       换算写入;该映射上线前同步的 Sprint 为 NULL,此时返回 null,前端渲染为「待接入」。
     - 故障平均解决时长:取 rdm_bug_avgtime_sprint(工作日口径),与「故障平均解决时长」
       趋势图同源;其中 dev+test 才是完整解决过程(create→test→finish)。
-    - 故事平均完成时长:rdm_story_duration.duration(工作日秒)
     - 故事完成率:故事类中 status ∈ {已完成, 待验收} 的占比。**待验收计为完成** ——
       开发侧已交付、只差验收动作,若排除会把收口进度系统性低估。
     - 用例数 / 用例数每故事:rdm_testcase 中归属该 Sprint 的用例。该表由「文档导入」
@@ -1279,25 +1307,12 @@ async def get_sprint_summary(
             WHERE sprint_id = :sprint_id
         """), {"sprint_id": sprint_id}).fetchone()
 
-        # ── 故事平均完成时长(工作日秒);无样本时返回 None ──
-        story_duration = session.execute(text("""
-            SELECT AVG(duration), COUNT(*) FROM rdm_story_duration
-            WHERE sprint_id = :sprint_id
-        """), {"sprint_id": sprint_id}).fetchone()
-        story_sample_count = int(story_duration[1] or 0)
-        avg_story_seconds = (
-            int(story_duration[0]) if story_sample_count > 0 and story_duration[0] is not None
-            else None
-        )
-
-        # ── 计划区间内的工作日数(sys_workday 是工作日的唯一源)──
-        workday_count = None
-        if startdate and enddate:
-            start_str = (startdate.date() if isinstance(startdate, datetime) else startdate).isoformat()
-            end_str = (enddate.date() if isinstance(enddate, datetime) else enddate).isoformat()
-            workday_count = int(session.execute(text("""
-                SELECT COUNT(*) FROM sys_workday WHERE datestr BETWEEN :start AND :end
-            """), {"start": start_str, "end": end_str}).fetchone()[0] or 0)
+        # ── 工作日数(sys_workday 是工作日的唯一源)──
+        # 计划区间与「激活 → 完成」实际区间**各算一份**:两个自然日跨度
+        # (duration_days / actual_days)本就分属两个区间,工作日数必须与之一一配对,
+        # 否则「实际自然日 + 计划工作日」的混搭会让使用者算出错误的投入强度。
+        workday_count = _workday_count(session, startdate, enddate)
+        actual_workday_count = _workday_count(session, activated_date, complete_date)
 
         def _iso(value) -> str | None:
             """datetime → 'YYYY-MM-DD HH:mm:ss';None 原样返回 None。
@@ -1323,6 +1338,7 @@ async def get_sprint_summary(
             "duration_days": _duration_days(startdate, enddate),
             "actual_days": _duration_days(activated_date, complete_date),
             "workday_count": workday_count,
+            "actual_workday_count": actual_workday_count,
 
             # 投入规模
             "member_count": len(members),
@@ -1337,8 +1353,6 @@ async def get_sprint_summary(
             "story_done_rate": _rate(story_done_count, story_count),
             "story_unplanned_count": story_unplanned_count,
             "story_unplanned_rate": _rate(story_unplanned_count, story_count),
-            "avg_story_seconds": avg_story_seconds,
-            "story_sample_count": story_sample_count,
 
             # 任务
             "task_count": task_count,
@@ -1351,7 +1365,6 @@ async def get_sprint_summary(
             "doc_bug_count": int(doc_bug_count),
             "bug_reopen_count": int(bug_reopen_count),
             "bug_reopen_rate": _rate(int(bug_reopen_count), bug_count),
-            "bug_per_member": round(bug_count / len(members), 2) if members else None,
             "avg_bug_dev_seconds": int(avg_bug[0] or 0),
             "avg_bug_test_seconds": int(avg_bug[1] or 0),
             "avg_bug_finish_seconds": int(avg_bug[2] or 0),

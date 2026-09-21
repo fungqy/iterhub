@@ -241,11 +241,18 @@ export interface SprintSummary {
   /** Sprint 激活 / 完成时刻 */
   activated_date: string | null
   complete_date: string | null
-  /** 计划跨度(自然日,含首尾)与区间内工作日数 */
+  /**
+   * 迭代时长的两套区间,各自「自然日跨度 + 工作日数」成对出现,**不混用**:
+   *   - 计划区间(start_date → end_date):duration_days / workday_count
+   *   - 实际区间(activated_date → complete_date):actual_days / actual_workday_count
+   * 两个跨度都含首尾;工作日数取自 sys_workday(休息日 / 节假日不计)。
+   * 迭代未完成(无 complete_date)时,实际区间那一对整组为 null —— 与「0 天」含义不同。
+   */
   duration_days: number | null
   workday_count: number | null
-  /** 实际跨度:激活 → 完成(自然日);未完成时为 null */
   actual_days: number | null
+  /** 实际区间的工作日数(激活 → 完成);未完成时为 null */
+  actual_workday_count: number | null
 
   member_count: number
   /**
@@ -271,9 +278,6 @@ export interface SprintSummary {
   story_unplanned_count: number
   /** 计划外故事 / 故事总数,0~1 */
   story_unplanned_rate: number | null
-  /** 故事平均完成时长(工作日秒);无样本为 null */
-  avg_story_seconds: number | null
-  story_sample_count: number
 
   /** issue_type = '子任务'(与「任务到期提醒」同口径) */
   task_count: number
@@ -287,8 +291,6 @@ export interface SprintSummary {
   bug_reopen_count: number
   /** 重开故障 / 故障总数,0~1 */
   bug_reopen_rate: number | null
-  /** 故障数 / 成员数 */
-  bug_per_member: number | null
   /** 故障平均解决时长(工作日秒)。dev+test 才是完整「创建 → 关闭」过程 */
   avg_bug_dev_seconds: number
   avg_bug_test_seconds: number

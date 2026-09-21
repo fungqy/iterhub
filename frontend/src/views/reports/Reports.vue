@@ -164,6 +164,21 @@ function timeSeriesOf(metrics: SprintMetricsItem[]): CoreChartSeries[] {
   // 平均时长由秒换算为天,保留一位小数
   const devData = metrics.map(s => ({ value: s.avg_dev_seconds > 0 ? parseFloat((s.avg_dev_seconds / 86400).toFixed(1)) : 0 }))
   const testData = metrics.map(s => ({ value: s.avg_test_seconds > 0 ? parseFloat((s.avg_test_seconds / 86400).toFixed(1)) : 0 }))
+  // 点位数值标签:两条曲线各标自己的值(天),颜色取各自系列色 ——
+  // 开发线常紧贴测试线之上,若统一用轴标签的灰字,两个数字会分不清属于哪条线。
+  // ⚠ 改前只有「测试时长」那条挂了标签,且 formatter 取的是 dev+test 的**合计**:
+  //   于是「开发时长」整条线一个数字都没有,而「测试时长」线上的数字其实是总时长,
+  //   既缺值又误导(总时长被挂在了两个分量的其中一个上)。合计不在本图展示 ——
+  //   它由概览卡的「故障平均解决时长」与明细弹窗的「总时长」列负责,tooltip 里
+  //   也分别给出 Dev / Test 两段,需要时相加即可。
+  // 数值为 0(该 Sprint 没有时长样本)时不打标签,避免一排「0d」把趋势淹没。
+  const dayLabel = (color: string) => ({
+    show: true,
+    position: 'top',
+    color,
+    fontSize: 14,
+    formatter: (p: EChartTooltipParam) => { const v = toNumber(p.value); return v > 0 ? parseFloat(v.toFixed(1)) + 'd' : '' },
+  })
   // 面积折线渐变:透明度随 y 递减,使时长趋势更直观(实现见 chartPalette.ts)
   return [
     {
@@ -174,6 +189,7 @@ function timeSeriesOf(metrics: SprintMetricsItem[]): CoreChartSeries[] {
       lineStyle: { color: CHART.series4, width: 3 },
       itemStyle: { color: CHART.series4 },
       areaStyle: { color: chartAreaGradient(chartBarFill(CHART.series4, 0.30)) },
+      label: dayLabel(CHART.series4),
     },
     {
       name: 'Test',
@@ -183,7 +199,7 @@ function timeSeriesOf(metrics: SprintMetricsItem[]): CoreChartSeries[] {
       lineStyle: { color: CHART.series2, width: 3 },
       itemStyle: { color: CHART.series2 },
       areaStyle: { color: chartAreaGradient(chartBarFill(CHART.series2, 0.30)) },
-      label: { show: true, position: 'top', color: chrome.value.axisLabel, fontSize: 14, formatter: (p: EChartTooltipParam) => { const v = toNumber(devData[p.dataIndex]?.value) + toNumber(testData[p.dataIndex]?.value); return v > 0 ? parseFloat(v.toFixed(1)) + 'd' : '' } },
+      label: dayLabel(CHART.series2),
     },
   ]
 }

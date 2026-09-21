@@ -14,17 +14,15 @@ import MetricHelp from './MetricHelp.vue'
 // 口径与易误读处(哪些计入完成、分母是哪、null 表示什么),与组件内各卡的注释同义。
 const METRIC_HELP: Record<string, string> = {
   member: '参与本次迭代的成员数量。\n\n点击可查看每个成员的 任务数 / 故障数。',
-  range: '本次迭代的实际跨度天数(激活日 → 完成日)。',
+  range: '本次迭代的实际跨度天数(激活日 → 完成日,自然日含首尾)。\n\n副标题的「工作日」是同一实际区间内落在工作日历上的天数(不含周末与节假日);\n「计划 N 天(M 工作日)」则是计划区间(起止日期)的自然日跨度与其工作日数。',
   worktime: '计划工时与投入工时的对比。\n\n投入大于计划时，点击可查看计划与投入不一致的条目。',
   story: '本次迭代的故事数量。\n\n点击可查看该迭代的故事燃尽图。',
   doneRate: '已完成故事(含待验收)占故事总数的比例。',
   task: '本次迭代的子任务数量。',
   bug: '本次迭代的故障数量。',
-  bugPerMember: '每个成员的平均故障数量,衡量人均故障负荷。',
   avgBug: '故障从开发到测试完成的平均工作日时长。',
   reopen: '被重开过的故障数与故障总数的比例。\n\n点击可查看该迭代被重开的故障列表。',
   unplanned: 'Sprint激活后新增的故事数量与故事总数的比例。',
-  avgStory: '故事从开始到完成的平均工作日时长。',
   caseCount: '本次迭代的用例总数。',
   caseCoverage: '本次迭代中有用例关联的故事占比。\n\n用来衡量需求与验证之间是否建立了可追溯的闭环，是敏捷团队工程实践成熟度和交付质量保障能力的重要过程指标。',
   casePerStory: '用例数量与故事数量的比例,衡量每个故事的平均用例密度。',
@@ -41,6 +39,12 @@ const METRIC_HELP: Record<string, string> = {
 //    其中「用例数 / 故事」在故事数为 0(没有分母)时仍退回「—」。
 //    用例覆盖率同源,故事数为 0 时整卡走预留态。
 // 3. 卡片顺序:投入规模(人/时长/工时)→ 产出(故事/任务/用例)→ 质量(故障/重开/时长)。
+//    (2026-09-21 按用户要求下线「故事平均完成时长」卡;它依赖的 avg_story_seconds /
+//     story_sample_count 是**只服务于该卡**的字段,故后端 /sprint-summary 也一并删掉这
+//     两个字段与那句 rdm_story_duration 查询 —— 留一个没人读的字段比删掉更容易误导。
+//     rdm_story_duration 表与其 RDM 同步任务不受影响,后续要拿它做趋势图再按需取数。
+//     同日一并下线「故障数 / 成员」(bug_per_member):该比值与同屏的「故障数」
+//     「团队成员」两张卡完全共料,读者一眼就能相除,单独占一格的价值不足。)
 // 4. 可下钻的卡一律把意图 emit 给父级,本组件不持有任何弹窗(同一个弹窗挂两份实例会
 //    出现两套互不相干的加载状态)。2026-09-21 起本弹窗还是四种下钻的**唯一入口**:
 //      故事数 → 燃尽图、故障数 → 故障分布统计、故障平均解决时长 → 时长明细、
@@ -129,6 +133,22 @@ const rangeText = computed(() => {
   }
   if (s.activated_date) parts.push(`激活 ${formatDate(s.activated_date)}`)
   if (s.complete_date) parts.push(`完成 ${formatDate(s.complete_date)}`)
+  return parts.join(' · ')
+})
+
+// 「迭代时长」卡的副标题:实际工作日 → 计划跨度(附计划工作日)。
+// ⚠ 第一项必须与主数值**同区间**:主数值是「激活 → 完成」的实际自然日跨度,
+//    所以这里的工作日数取 actual_workday_count。改前取的是 workday_count(计划区间),
+//    于是拖期迭代会出现「实际 25 天 / 工作日 8 天」这种跨区间的混搭,两数无从比较。
+//    计划口径的两个数(自然日 + 工作日)成对放在后半段,各自都有配对项。
+const rangeSubText = computed(() => {
+  const s = summary.value
+  if (!s) return ''
+  const parts = [`工作日 ${s.actual_workday_count ?? '—'} 天`]
+  if (s.duration_days !== null) {
+    const planWorkday = s.workday_count !== null ? `(${s.workday_count} 工作日)` : ''
+    parts.push(`计划 ${s.duration_days} 天${planWorkday}`)
+  }
   return parts.join(' · ')
 })
 
@@ -396,18 +416,18 @@ function openWorktimeMismatch() {
              实际常与之严重脱节(拖期收尾、跨迭代遗留),用计划口径会低估真实投入时长。
              未完结的迭代没有 complete_date,无从计算,主数值显示「—」;
              此时计划跨度退到副标题,信息不丢。
-             区间文本仍保持计划起止:它是迭代的定义周期,数值上与副标题的「计划跨度」必然相等,
-             两处可互相对上号;若把区间也换成实际起止,进行中的迭代会缺一半日期。 -->
+             区间文本仍保持计划起止:它是迭代的定义周期,数值上与副标题的「计划 X 天」必然相等,
+             两处可互相对上号;若把区间也换成实际起止,进行中的迭代会缺一半日期。
+             ⚠ 副标题的两半各有配对:前半段「工作日 N 天」与主数值同取实际区间
+                (见 rangeSubText 的注释),后半段「计划 X 天(Y 工作日)」同取计划区间 ——
+                跨区间的数字放在一行里没有可比性,别再把它们拆开重组。 -->
         <div class="ds-metric is-range">
           <span class="ds-metric-label">迭代时长<MetricHelp :help="METRIC_HELP.range" /></span>
           <span class="ds-metric-value">
             {{ summary.actual_days ?? '—'
             }}<span v-if="summary.actual_days !== null" class="ds-metric-unit">天</span>
           </span>
-          <span class="ds-metric-sub">
-            工作日 {{ summary.workday_count ?? '—' }} 天<template v-if="summary.duration_days !== null">
-              · 计划跨度 {{ summary.duration_days }} 天</template>
-          </span>
+          <span class="ds-metric-sub">{{ rangeSubText }}</span>
         </div>
 
         <!-- 工时:计划 / 投入 左右分隔(合并原「计划工时」「投入工时」两张卡)。
@@ -516,15 +536,6 @@ function openWorktimeMismatch() {
           </span>
         </component>
 
-        <!-- 故障数/成员:分母做成胶囊,避免把比值读成绝对值 -->
-        <div class="ds-metric is-ratio">
-          <span class="ds-metric-label">故障数 / 成员<MetricHelp :help="METRIC_HELP.bugPerMember" /></span>
-          <span class="ds-metric-value">
-            {{ summary.bug_per_member === null ? '—' : summary.bug_per_member }}
-          </span>
-          <span class="ds-metric-chip">{{ summary.bug_count }} 个 / {{ summary.member_count }} 人</span>
-        </div>
-
         <!-- 故障平均解决时长:开发 + 测试两段构成。有样本时整卡是可下钻控件(button),
              下钻到「故障平均解决时长(工作日口径)」明细;无样本(总时长为 0)退回 div,
              避免留下一个可点却空转的控件。结构与「故障数」卡同构。 -->
@@ -607,17 +618,6 @@ function openWorktimeMismatch() {
           <span v-else class="ds-metric-badge">该迭代无故事</span>
         </component>
 
-        <!-- 故事平均完成时长 -->
-        <div class="ds-metric" :class="summary.avg_story_seconds === null ? 'is-reserved' : 'is-plain'">
-          <span class="ds-metric-label">故事平均完成时长<MetricHelp :help="METRIC_HELP.avgStory" /></span>
-          <span class="ds-metric-value">
-            {{ summary.avg_story_seconds === null ? '—' : secondsToDays(summary.avg_story_seconds)
-            }}<span v-if="summary.avg_story_seconds !== null" class="ds-metric-unit">天</span>
-          </span>
-          <span v-if="summary.avg_story_seconds === null" class="ds-metric-badge">无完成样本</span>
-          <span v-else class="ds-metric-sub">样本 {{ summary.story_sample_count }} 个</span>
-        </div>
-
         <!-- 用例数:归属口径 = 用例引用的故事 ∩ 本 Sprint 故事(见后端 docstring)。
              与「任务数」同为计数卡,故形态沿用 is-plain + 口径副标题。 -->
         <div class="ds-metric is-plain tone-info">
@@ -652,7 +652,8 @@ function openWorktimeMismatch() {
           <span v-else class="ds-metric-badge">该迭代无故事</span>
         </div>
 
-        <!-- 用例数/故事:与「故障数 / 成员」同构 —— 分母做成胶囊,避免把比值读成绝对值。
+        <!-- 用例数/故事:分母做成胶囊,避免把比值读成绝对值(本弹窗现存的唯一 is-ratio 卡;
+             原先同构的「故障数 / 成员」已于 2026-09-21 下线)。
              故事数为 0 时没有分母,值为「—」(与其余比率卡同规则)。 -->
         <div class="ds-metric is-ratio">
           <span class="ds-metric-label">用例数 / 故事<MetricHelp :help="METRIC_HELP.casePerStory" /></span>
