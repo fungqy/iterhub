@@ -10,12 +10,15 @@ from util.jira import ProjectRemindConfig
 
 logger = logging.getLogger(__name__)
 
-# 外部服务凭据统一从环境变量读取,缺失即拒绝运行,绝不静默放行。
+# GitLab / Sonar 的内网地址**不是凭据**:给内置默认值(与 .env.example 当前值一致),
+# 环境变量仍可覆盖。缺一个地址不该让整个任务模块拒绝运行。
+DEFAULT_GITLAB_URL = "http://gitlab.zoomlion.com"
+DEFAULT_SONAR_URL = "http://sonar.zvos.zoomlion.com"
+
+# 外部服务**凭据**统一从环境变量读取,缺失即拒绝运行,绝不静默放行。
 _REMIND_SONAR_REQUIRED_ENV = (
-    "GITLAB_URL",
     "GITLAB_TOKEN",
     "GITLAB_USERNAME",
-    "SONAR_URL",
     "SONAR_TOKEN",
 )
 for _key in _REMIND_SONAR_REQUIRED_ENV:
@@ -49,8 +52,8 @@ def get_debug_config(board_id: str):
 dateattr = DateAttr()
 
 
-# GITLAB 配置信息（从环境变量读取）
-GITLAB_URL = os.environ["GITLAB_URL"]
+# GITLAB 配置信息（地址可用环境变量覆盖,凭据必须显式提供）
+GITLAB_URL = os.getenv("GITLAB_URL", DEFAULT_GITLAB_URL)
 GITLAB_TOKEN = os.environ["GITLAB_TOKEN"]
 GITLAB_USERNAME = os.environ["GITLAB_USERNAME"]
 GROUP_KEY_MAP = {
@@ -60,8 +63,8 @@ GROUP_KEY_MAP = {
 }  # GitLab Group ID
 GITLAB_HEADERS = {"Private-Token": GITLAB_TOKEN}
 
-# SONAR 配置信息（从环境变量读取）
-SONAR_URL = os.environ["SONAR_URL"]
+# SONAR 配置信息（地址可用环境变量覆盖,凭据必须显式提供）
+SONAR_URL = os.getenv("SONAR_URL", DEFAULT_SONAR_URL)
 SONAR_TOKEN = os.environ["SONAR_TOKEN"]
 SONAR_AUTH = (SONAR_TOKEN, "")
 # 获取项目的API

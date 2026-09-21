@@ -19,8 +19,12 @@ from db.dboperator import DbOperator
 
 logger = logging.getLogger(__name__)
 
+# Confluence 内网地址**不是凭据**:给内置默认值(与 .env.example 当前值一致),
+# 环境变量仍可覆盖。缺一个地址不该让整个模块拒绝运行。
+DEFAULT_WIKI_URL = "http://wiki.zvos.zoomlion.com"
+
 # WIKI信息 - 敏感凭据从环境变量读取,缺失则拒绝运行。
-WIKI_REQUIRED_ENV = ("WIKI_USERNAME", "WIKI_PASSWORD", "WIKI_URL")
+WIKI_REQUIRED_ENV = ("WIKI_USERNAME", "WIKI_PASSWORD")
 for _key in WIKI_REQUIRED_ENV:
     if not os.getenv(_key):
         raise RuntimeError(
@@ -29,7 +33,7 @@ for _key in WIKI_REQUIRED_ENV:
             f"示例值见 .env.example。"
         )
 
-CONFLUENCE_URL = os.environ["WIKI_URL"]
+CONFLUENCE_URL = os.getenv("WIKI_URL", DEFAULT_WIKI_URL)
 USERNAME = os.environ["WIKI_USERNAME"]
 PASSWORD = os.environ["WIKI_PASSWORD"]
 
