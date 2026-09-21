@@ -89,7 +89,7 @@ def create_default_user():
     with get_session() as session:
         user = session.query(User).filter(User.username == "admin").first()
         if user:
-            logger.info("默认账号已存在")
+            logger.info("账号 admin 已存在")
             return
 
         password = os.getenv(_ADMIN_PASSWORD_ENV)
