@@ -24,20 +24,60 @@ const emit = defineEmits<{
   (e: 'summary-all-click'): void
 }>()
 
-function getCellCount(developer: string, priority: string, tag: string): number {
-  const devData = props.detail.data[developer]
-  if (!devData) return 0
-  const priorityData = devData[priority]
-  if (!priorityData) return 0
-  return priorityData[tag] || 0
+/** 矩阵的一行:开发 + 该开发的分组计数。counts 直接引用接口数据(不复制一份) */
+interface MatrixRow {
+  developer: string
+  total: number
+  /** 优先级 → 标签 → 计数 */
+  counts: Record<string, Record<string, number> | undefined>
 }
 
-function getTableColumnTotal(priority: string, tag: string): number {
-  let total = 0
-  for (const dev of props.detail.developers) {
-    total += getCellCount(dev.developer, priority, tag)
+/**
+ * 单元格计数与列合计**预计算**。
+ *
+ * 原先是在模板里按格调函数:同一格一次渲染被调两次(v-if 判空 + 插值显示),
+ * 而「合计」那一行每格还要把**全部开发**再遍历一遍。
+ * 这张表的列数是数据驱动的(优先级 × 标签,5 × 7 就是 35 列),行数虽少,但格数是
+ * 「行 × 列」乘出来的,而 DataTable 每次挂载(打开弹窗就是一次)都会整表重渲染 ——
+ * 于是这些重复查找会跟着格数一起放大。改成 computed 算一次、模板只做属性访问。
+ *
+ * ⚠ 模板、点击判定、合计行三处必须都读这两个结构:它们原先各调各的函数,
+ *   一旦哪处的取值方式分了叉,就会出现「看着有数字却点不动」这类静默不一致。
+ */
+const rows = computed<MatrixRow[]>(() =>
+  props.detail.developers.map(dev => ({
+    developer: dev.developer,
+    total: dev.total,
+    // 兜底空对象:后端只回吐出现过的开发,缺 key 时不该让模板取属性抛错
+    counts: props.detail.data[dev.developer] ?? {},
+  })),
+)
+
+/** 每列(优先级 × 标签)的合计 —— 表尾那一行用它,不再逐格遍历全部开发 */
+const columnTotals = computed<Record<string, Record<string, number> | undefined>>(() => {
+  const totals: Record<string, Record<string, number>> = {}
+  for (const priority of props.detail.priorities) {
+    const byTag: Record<string, number> = {}
+    for (const tag of props.detail.tags) {
+      let sum = 0
+      for (const row of rows.value) {
+        sum += row.counts[priority]?.[tag] ?? 0
+      }
+      byTag[tag] = sum
+    }
+    totals[priority] = byTag
   }
-  return total
+  return totals
+})
+
+/** 单格计数(读预计算结构) */
+function cellCountOf(row: MatrixRow, priority: string, tag: string): number {
+  return row.counts[priority]?.[tag] ?? 0
+}
+
+/** 单列合计(读预计算结构) */
+function columnTotalOf(priority: string, tag: string): number {
+  return columnTotals.value[priority]?.[tag] ?? 0
 }
 
 const grandTotal = computed(() =>
@@ -70,14 +110,16 @@ const numColWidth = computed(() => {
   return `max(${MIN_COL_WIDTH}, calc((100% - ${DEV_COL_WIDTH} - ${MIN_COL_WIDTH}) / ${n}))`
 })
 
-function onCellClick(developer: string, priority: string, tag: string) {
-  if (getCellCount(developer, priority, tag) > 0) {
-    emit('cell-click', developer, priority, tag)
+// ⚠ 判定与模板的 v-if 同源(都走 cellCountOf / columnTotalOf),防止将来模板改动后
+//   出现「看着可点却点不动」。
+function onCellClick(row: MatrixRow, priority: string, tag: string) {
+  if (cellCountOf(row, priority, tag) > 0) {
+    emit('cell-click', row.developer, priority, tag)
   }
 }
 
 function onSummaryCellClick(priority: string, tag: string) {
-  if (getTableColumnTotal(priority, tag) > 0) {
+  if (columnTotalOf(priority, tag) > 0) {
     emit('summary-click', priority, tag)
   }
 }
@@ -87,7 +129,7 @@ function onSummaryCellClick(priority: string, tag: string) {
   <div class="flex flex-col gap-3">
     <h3 class="ds-section-title">分布明细</h3>
     <DataTable
-      :value="detail.developers"
+      :value="rows"
       class="ds-table ds-table--matrix ds-table--center"
     >
       <template #empty>暂无数据</template>
@@ -196,13 +238,13 @@ function onSummaryCellClick(priority: string, tag: string) {
                  （onCellClick 里的 `> 0` 判定保留：它与这里的条件同源，
                    防止将来模板改动后出现「看着可点却点不动」。） -->
             <button
-              v-if="getCellCount(data.developer, priority, tag) > 0"
+              v-if="cellCountOf(data, priority, tag) > 0"
               type="button"
               class="ds-cell-button"
               :aria-label="`查看 ${data.developer} / ${priority} / ${tag} 的故障明细`"
-              @click="onCellClick(data.developer, priority, tag)"
+              @click="onCellClick(data, priority, tag)"
             >
-              {{ getCellCount(data.developer, priority, tag) }}
+              {{ cellCountOf(data, priority, tag) }}
             </button>
           </template>
         </Column>
@@ -234,13 +276,13 @@ function onSummaryCellClick(priority: string, tag: string) {
                 <!-- 空值留空、不渲染 button —— 口径与表体完全一致(见上方 body 那段注释)。
                      合计 0 与表体 0 是同一件事(该列全员都没有故障),两处画法不该分叉。 -->
                 <button
-                  v-if="getTableColumnTotal(priority, tag) > 0"
+                  v-if="columnTotalOf(priority, tag) > 0"
                   type="button"
                   class="ds-cell-button"
                   :aria-label="`查看 ${priority} / ${tag} 合计的故障明细`"
                   @click="onSummaryCellClick(priority, tag)"
                 >
-                  {{ getTableColumnTotal(priority, tag) }}
+                  {{ columnTotalOf(priority, tag) }}
                 </button>
               </template>
             </Column>
